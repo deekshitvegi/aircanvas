@@ -5,6 +5,9 @@ from typing import Optional
 import cv2
 import numpy as np
 from flask import Flask, Response, render_template_string, request, jsonify
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from .camera import VideoStream
 from .canvas import AirCanvas
@@ -22,6 +25,11 @@ class CanvasServerEngine:
         self.latest_frame: Optional[np.ndarray] = None
         self.latest_telemetry = {}
         self.is_running = True
+
+        # Preload key if available in environment
+        env_key = os.getenv("GEMINI_API_KEY")
+        if env_key:
+            self.canvas.set_api_key(env_key)
 
         self._start_stream()
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -68,7 +76,7 @@ class CanvasServerEngine:
         with self.lock:
             if self.latest_frame is None:
                 return None
-            ret, jpeg = cv2.imencode(".jpg", self.latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            ret, jpeg = cv2.imencode(".jpg", self.latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             return jpeg.tobytes() if ret else None
 
 
@@ -76,140 +84,587 @@ engine = CanvasServerEngine()
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AirCanvas - Magic Pencil & Touchless Drawing</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirCanvas Studio</title>
     <style>
-        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
-        aside { width: 320px; background-color: #161b22; padding: 18px; border-right: 1px solid #30363d; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; flex-shrink: 0; }
-        main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
-        .video-box { max-width: 920px; width: 100%; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; position: relative; }
-        img { width: 100%; display: block; }
-        .pill-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-        button { background-color: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 7px; border-radius: 6px; cursor: pointer; font-size: 0.82rem; transition: all 0.15s; }
-        button:hover { background-color: #30363d; }
-        button.active { border-color: #58a6ff; color: #58a6ff; font-weight: bold; background-color: #1f2937; }
-        .magic-btn { background: linear-gradient(135deg, #8a2be2, #ff1493); color: white; border: none; font-weight: bold; padding: 9px; border-radius: 6px; cursor: pointer; width: 100%; }
-        .magic-btn:hover { filter: brightness(1.15); }
-        .action-btn { background-color: #238636; color: white; width: 100%; margin-top: 4px; font-weight: 500; }
-        .action-btn:hover { background-color: #2ea043; }
-        .hint-box { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px; font-size: 0.76rem; line-height: 1.4; color: #8b949e; }
-        .hint-box b { color: #58a6ff; }
+        :root {
+            --bg-canvas: #090a0f;
+            --surface-1: #12151d;
+            --surface-2: #1b1f2b;
+            --surface-3: #242938;
+            --border-subtle: #232838;
+            --border-strong: #333a4f;
+            --text-primary: #f0f3f8;
+            --text-secondary: #909bb0;
+            --accent-primary: #3b82f6;
+            --accent-glow: rgba(59, 130, 246, 0.15);
+            --accent-pink: #ec4899;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-canvas);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* Top Navigation */
+        header {
+            height: 52px;
+            background-color: var(--surface-1);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            letter-spacing: -0.2px;
+            color: #ffffff;
+        }
+
+        .brand-pill {
+            font-size: 0.72rem;
+            font-weight: 500;
+            padding: 3px 8px;
+            background-color: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            color: var(--text-secondary);
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .status-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+        }
+
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: #10b981;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+        }
+
+        .ghost-button {
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.78rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .ghost-button:hover {
+            background-color: var(--surface-2);
+            border-color: var(--border-strong);
+        }
+
+        /* Studio Main Workspace */
+        main {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at center, #11141f 0%, #08090d 100%);
+            padding: 24px;
+            overflow: hidden;
+        }
+
+        .canvas-frame {
+            position: relative;
+            max-width: 960px;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background-color: #000;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .canvas-frame img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* Floating Studio Bottom Dock */
+        .bottom-dock {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(18, 21, 29, 0.92);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-strong);
+            border-radius: 40px;
+            padding: 6px 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            z-index: 20;
+        }
+
+        .dock-tool {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 7px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .dock-tool:hover {
+            color: var(--text-primary);
+            background-color: var(--surface-2);
+        }
+
+        .dock-tool.active {
+            background-color: #2563eb;
+            color: #ffffff;
+            box-shadow: 0 0 14px rgba(37, 99, 235, 0.4);
+        }
+
+        .dock-divider {
+            width: 1px;
+            height: 20px;
+            background-color: var(--border-strong);
+        }
+
+        .dock-color-swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        /* Object Generator Drawer */
+        .generator-panel {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            width: 310px;
+            background-color: rgba(18, 21, 29, 0.94);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+            z-index: 20;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 0.82rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
+        }
+
+        .panel-input-wrap {
+            display: flex;
+            gap: 8px;
+        }
+
+        input[type="text"], input[type="password"] {
+            flex: 1;
+            background-color: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            padding: 8px 10px;
+            font-size: 0.82rem;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        input:focus {
+            border-color: var(--accent-primary);
+        }
+
+        .btn-primary {
+            background-color: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.82rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.15s;
+        }
+
+        .btn-primary:hover {
+            background-color: #1d4ed8;
+        }
+
+        .btn-secondary {
+            background-color: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+            padding: 7px 10px;
+            border-radius: var(--radius-sm);
+            font-size: 0.78rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--surface-3);
+            border-color: var(--border-strong);
+        }
+
+        .chip-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+        }
+
+        .chip {
+            background-color: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-size: 0.74rem;
+            padding: 6px 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .chip:hover {
+            color: var(--text-primary);
+            border-color: var(--border-strong);
+            background-color: var(--surface-3);
+        }
+
+        /* Settings Dialog Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .modal-card {
+            width: 420px;
+            background-color: var(--surface-1);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-lg);
+            padding: 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .modal-title {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .instruction-note {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            background-color: var(--surface-2);
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            border-left: 3px solid var(--accent-primary);
+        }
     </style>
 </head>
 <body>
-    <aside>
-        <div>
-            <h2 style="font-size: 1.2rem; color: #fff; margin-bottom: 2px;">AirCanvas Magic Studio</h2>
-            <p style="font-size: 0.78rem; color: #8b949e;">Touchless Gesture Drawing & Real Object Materializer</p>
+
+    <header>
+        <div class="header-brand">
+            <span class="brand-title">AirCanvas Studio</span>
+            <span class="brand-pill">Gesture Perception & Generative Objects</span>
         </div>
-        
-        <div>
-            <label style="font-size: 0.75rem; text-transform: uppercase; color: #8b949e; font-weight: 600;">Drawing Tools</label>
-            <div class="pill-grid" style="margin-top: 6px;">
-                <button onclick="setTool('CYAN')" class="active tool-btn" id="btnCYAN">Cyan</button>
-                <button onclick="setTool('PURPLE')" class="tool-btn" id="btnPURPLE">Purple</button>
-                <button onclick="setTool('GREEN')" class="tool-btn" id="btnGREEN">Green</button>
-                <button onclick="setTool('AMBER')" class="tool-btn" id="btnAMBER">Amber</button>
-                <button onclick="setTool('MAGIC')" class="tool-btn" id="btnMAGIC" style="color: #ff69b4; font-weight: bold;">✨ Magic</button>
-                <button onclick="setTool('ERASER')" class="tool-btn" id="btnERASER">Eraser</button>
+
+        <div class="header-controls">
+            <div class="status-tag">
+                <span class="status-dot"></span>
+                <span id="fpsIndicator">30.0 FPS</span>
             </div>
-        </div>
 
-        <div style="border-top: 1px solid #30363d; padding-top: 10px;">
-            <label style="font-size: 0.75rem; text-transform: uppercase; color: #8b949e; font-weight: 600;">✨ Magic Pencil: Materialize</label>
-            <button class="magic-btn" onclick="materializeDrawing()" style="margin-top: 6px;">✨ Materialize My Drawing</button>
-            <div style="font-size: 0.75rem; color: #8b949e; margin-top: 6px;">Or spawn instant interactive object:</div>
-            <div class="pill-grid" style="margin-top: 6px;">
-                <button onclick="spawnObject('banana')">🍌 Banana</button>
-                <button onclick="spawnObject('sunglasses')">🕶️ Glasses</button>
-                <button onclick="spawnObject('crown')">👑 Crown</button>
-                <button onclick="spawnObject('apple')">🍎 Apple</button>
-                <button onclick="spawnObject('pizza')">🍕 Pizza</button>
-                <button onclick="clearObjects()" style="color: #da3633;">🗑️ Clear</button>
-            </div>
-        </div>
+            <button class="ghost-button" onclick="toggleMirrorMode()">
+                Mirror: <span id="mirrorState">Selfie</span>
+            </button>
 
-        <div class="hint-box">
-            <b>🎮 How to Play with Objects:</b><br>
-            • Draw a shape in the air with the <b>✨ Magic</b> tool.<br>
-            • It instantly materializes into a real transparent object!<br>
-            • <b>Pinch</b> your index finger and thumb together near the object to <b>grab and move</b> it anywhere on screen!
+            <button class="ghost-button" onclick="openKeyModal()">
+                API Key: <span id="apiKeyLabel">Configure</span>
+            </button>
         </div>
-
-        <div style="border-top: 1px solid #30363d; padding-top: 10px;">
-            <label style="font-size: 0.75rem; text-transform: uppercase; color: #8b949e; font-weight: 600;">Camera Settings</label>
-            <select onchange="setSource(this.value)" style="width: 100%; padding: 6px; background: #0d1117; color: white; border: 1px solid #30363d; border-radius: 6px; margin-top: 4px; font-size: 0.8rem;">
-                <option value="0">Webcam</option>
-                <option value="synthetic">Synthetic Stream</option>
-            </select>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <label for="mirrorBox" style="font-size: 0.8rem; cursor: pointer;">Mirror Camera (Selfie View)</label>
-            <input type="checkbox" id="mirrorBox" checked onchange="setMirror(this.checked)" style="width: 16px; height: 16px; cursor: pointer;" />
-        </div>
-
-        <button class="action-btn" onclick="clearCanvas()">Clear Stroke Lines</button>
-        <button class="action-btn" style="background-color: #1f6feb;" onclick="saveSnapshot()">Save Snapshot</button>
-    </aside>
+    </header>
 
     <main>
-        <div class="video-box">
-            <img src="/video_feed" alt="AirCanvas Stream" />
+        <div class="canvas-frame">
+            <img src="/video_feed" alt="Studio Feed" />
         </div>
-        <div style="margin-top: 10px; font-family: monospace; font-size: 0.88rem; color: #3fb950;" id="statusBadge">
-            30.0 FPS | TOOL: CYAN | MODE: HOVER | OBJECTS: 0
+
+        <!-- Generative Object Studio Panel -->
+        <div class="generator-panel">
+            <div class="panel-header">
+                <span class="panel-title">Nano Banana Generator</span>
+                <span id="objectCounter" style="font-size: 0.72rem; color: var(--text-secondary); font-family: monospace;">0 Objects</span>
+            </div>
+
+            <div style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.35;">
+                Draw an outline in the air with the Magic tool, or enter any object to synthesize with Nano Banana cutout:
+            </div>
+
+            <div class="panel-input-wrap">
+                <input type="text" id="objectPrompt" placeholder="Object (e.g. electric guitar, sword, cup)" />
+                <button class="btn-primary" onclick="materializePrompt()">Create</button>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Quick Cutouts</span>
+                <button class="btn-secondary" style="padding: 3px 8px; font-size: 0.7rem;" onclick="clearObjects()">Clear Objects</button>
+            </div>
+
+            <div class="chip-grid">
+                <div class="chip" onclick="spawnCutout('banana')">Banana</div>
+                <div class="chip" onclick="spawnCutout('sunglasses')">Glasses</div>
+                <div class="chip" onclick="spawnCutout('crown')">Crown</div>
+                <div class="chip" onclick="spawnCutout('apple')">Apple</div>
+                <div class="chip" onclick="spawnCutout('pizza')">Pizza</div>
+                <div class="chip" onclick="spawnCutout('guitar')">Guitar</div>
+            </div>
+
+            <div class="instruction-note" style="margin-top: 4px;">
+                <strong>Hand Control:</strong> Pinch your index finger and thumb together to grab and move any object in mid-air.
+            </div>
+        </div>
+
+        <!-- Floating Studio Dock -->
+        <div class="bottom-dock">
+            <button class="dock-tool active" data-tool="CYAN" onclick="selectTool('CYAN')">
+                <span class="dock-color-swatch" style="background: #00e5ff;"></span>
+                Cyan
+            </button>
+            <button class="dock-tool" data-tool="PURPLE" onclick="selectTool('PURPLE')">
+                <span class="dock-color-swatch" style="background: #ec4899;"></span>
+                Purple
+            </button>
+            <button class="dock-tool" data-tool="GREEN" onclick="selectTool('GREEN')">
+                <span class="dock-color-swatch" style="background: #10b981;"></span>
+                Green
+            </button>
+            <button class="dock-tool" data-tool="AMBER" onclick="selectTool('AMBER')">
+                <span class="dock-color-swatch" style="background: #f59e0b;"></span>
+                Amber
+            </button>
+            <div class="dock-divider"></div>
+            <button class="dock-tool" data-tool="MAGIC" onclick="selectTool('MAGIC')" style="color: #f472b6;">
+                Magic Sketch
+            </button>
+            <button class="dock-tool" data-tool="ERASER" onclick="selectTool('ERASER')">
+                Eraser
+            </button>
+            <div class="dock-divider"></div>
+            <button class="dock-tool" onclick="clearStrokes()">
+                Clear Lines
+            </button>
+            <button class="dock-tool" onclick="saveSnapshot()">
+                Snapshot
+            </button>
         </div>
     </main>
 
+    <!-- API Key Settings Modal -->
+    <div id="keyModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-title">Gemini API Key Configuration</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45;">
+                Enter your Google AI Studio Gemini API key. This enables Nano Banana generative image synthesis and sketch understanding, and is automatically saved to your local environment.
+            </div>
+
+            <input type="password" id="modalKeyInput" placeholder="AIzaSy..." />
+
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                <button class="btn-secondary" onclick="closeKeyModal()">Cancel</button>
+                <button class="btn-primary" onclick="saveApiKey()">Save & Connect</button>
+            </div>
+        </div>
+    </div>
+
     <script>
-        async function setTool(tool) {
-            document.querySelectorAll(".tool-btn").forEach(b => b.classList.toggle("active", b.id === "btn" + tool));
-            await fetch("/api/tool", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ tool: tool }) });
+        let isMirror = true;
+
+        async function selectTool(tool) {
+            document.querySelectorAll(".dock-tool").forEach(b => {
+                b.classList.toggle("active", b.getAttribute("data-tool") === tool);
+            });
+            await fetch("/api/tool", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tool: tool })
+            });
         }
-        async function setSource(src) {
-            await fetch("/api/source", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ source: src }) });
+
+        async function toggleMirrorMode() {
+            isMirror = !isMirror;
+            document.getElementById("mirrorState").innerText = isMirror ? "Selfie" : "Standard";
+            await fetch("/api/mirror", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mirror: isMirror })
+            });
         }
-        async function setMirror(val) {
-            await fetch("/api/mirror", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ mirror: val }) });
+
+        async function materializePrompt() {
+            const prompt = document.getElementById("objectPrompt").value.trim();
+            const btn = event.target;
+            const originalText = btn.innerText;
+            btn.innerText = "Synthesizing...";
+            btn.disabled = true;
+
+            try {
+                await fetch("/api/materialize", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ prompt: prompt || "apple" })
+                });
+                document.getElementById("objectPrompt").value = "";
+            } catch (e) {
+                console.error("Error materializing:", e);
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
         }
-        async function clearCanvas() {
+
+        async function spawnCutout(name) {
+            await fetch("/api/spawn", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: name })
+            });
+        }
+
+        async function clearStrokes() {
             await fetch("/api/clear", { method: "POST" });
         }
+
         async function clearObjects() {
             await fetch("/api/clear_objects", { method: "POST" });
         }
-        async function materializeDrawing() {
-            const res = await fetch("/api/materialize", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ hint: "banana" }) });
-            const data = await res.json();
-            if (data.status === "ok") {
-                console.log("Materialized:", data.materialized);
-            }
-        }
-        async function spawnObject(name) {
-            await fetch("/api/spawn", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ name: name }) });
-        }
+
         async function saveSnapshot() {
             const res = await fetch("/api/snapshot", { method: "POST" });
             const data = await res.json();
-            alert("Snapshot saved: " + data.filename);
+            if (data.status === "ok") {
+                alert("Snapshot saved: " + data.filename);
+            }
+        }
+
+        function openKeyModal() {
+            document.getElementById("keyModal").style.display = "flex";
+        }
+
+        function closeKeyModal() {
+            document.getElementById("keyModal").style.display = "none";
+        }
+
+        async function saveApiKey() {
+            const key = document.getElementById("modalKeyInput").value.trim();
+            if (!key) return;
+            const res = await fetch("/api/set_api_key", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: key })
+            });
+            const data = await res.json();
+            if (data.status === "ok") {
+                document.getElementById("apiKeyLabel").innerText = "Connected";
+                closeKeyModal();
+            }
         }
 
         setInterval(async () => {
             try {
                 const res = await fetch("/api/status");
                 const data = await res.json();
-                let txt = `${data.fps} FPS | TOOL: ${data.active_tool} | MODE: ${data.mode} | OBJECTS: ${data.objects_count || 0}`;
-                if (data.grabbed_object) {
-                    txt += ` | PLAYING WITH: ${data.grabbed_object.toUpperCase()}`;
-                } else if (data.snapped_shape) {
-                    txt += ` | SNAPPED: ${data.snapped_shape.toUpperCase()}`;
+                document.getElementById("fpsIndicator").innerText = (data.fps || 30.0).toFixed(1) + " FPS";
+                document.getElementById("objectCounter").innerText = `${data.objects_count || 0} Objects`;
+
+                if (data.has_api_key) {
+                    document.getElementById("apiKeyLabel").innerText = "Connected";
                 }
-                document.getElementById("statusBadge").innerText = txt;
-                document.querySelectorAll(".tool-btn").forEach(b => b.classList.toggle("active", b.id === "btn" + data.active_tool));
+
+                // Sync active tool
+                document.querySelectorAll(".dock-tool[data-tool]").forEach(b => {
+                    b.classList.toggle("active", b.getAttribute("data-tool") === data.active_tool);
+                });
             } catch (e) {}
-        }, 180);
+        }, 200);
     </script>
 </body>
 </html>
@@ -248,13 +703,6 @@ def set_tool_endpoint():
     return jsonify({"status": "ok"})
 
 
-@app.route("/api/source", methods=["POST"])
-def set_source_endpoint():
-    s = request.get_json(force=True).get("source", 0)
-    engine.set_source(s)
-    return jsonify({"status": "ok"})
-
-
 @app.route("/api/mirror", methods=["POST"])
 def set_mirror_endpoint():
     m = request.get_json(force=True).get("mirror", True)
@@ -278,18 +726,27 @@ def clear_objects_endpoint():
 
 @app.route("/api/materialize", methods=["POST"])
 def materialize_endpoint():
-    hint = request.get_json(force=True).get("hint", "banana")
+    data = request.get_json(force=True)
+    prompt = data.get("prompt") or data.get("hint")
     with engine.lock:
-        obj = engine.canvas.materialize_current(hint=hint)
-        mat_name = obj.name if obj else "banana"
-    return jsonify({"status": "ok", "materialized": mat_name})
+        obj = engine.canvas.materialize_current(hint=prompt)
+        name = obj.name if obj else "object"
+    return jsonify({"status": "ok", "materialized": name})
 
 
 @app.route("/api/spawn", methods=["POST"])
 def spawn_endpoint():
-    name = request.get_json(force=True).get("name", "banana")
+    name = request.get_json(force=True).get("name", "apple")
     with engine.lock:
         engine.canvas.spawn_object(name)
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/set_api_key", methods=["POST"])
+def set_api_key_endpoint():
+    key = request.get_json(force=True).get("key", "").strip()
+    with engine.lock:
+        engine.canvas.set_api_key(key)
     return jsonify({"status": "ok"})
 
 
