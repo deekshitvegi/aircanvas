@@ -480,16 +480,21 @@ HTML_TEMPLATE = """
             </div>
 
             <div class="chip-grid">
+                <div class="chip" onclick="spawnCutout('iphone')">iPhone</div>
                 <div class="chip" onclick="spawnCutout('cube')">3D Cube</div>
                 <div class="chip" onclick="spawnCutout('airpods')">AirPods</div>
                 <div class="chip" onclick="spawnCutout('cricket bat')">Cricket Bat</div>
                 <div class="chip" onclick="spawnCutout('guitar')">Guitar</div>
                 <div class="chip" onclick="spawnCutout('sunglasses')">Sunglasses</div>
-                <div class="chip" onclick="spawnCutout('banana')">Banana</div>
             </div>
 
             <div class="instruction-note">
-                <strong>Mid-Air Grab:</strong> Pinch your index finger and thumb together near any object to pick it up and move it across your screen.
+                <div style="margin-bottom: 6px;">
+                    <strong>Finger Snap:</strong> Touch your <strong>Thumb & Middle finger</strong> together in the air to instantly turn your drawing into a real 3D object!
+                </div>
+                <div>
+                    <strong>Mid-Air Grab:</strong> Pinch your <strong>Thumb & Index finger</strong> together near any object to pick it up and move it.
+                </div>
             </div>
         </div>
 

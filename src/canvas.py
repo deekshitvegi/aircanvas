@@ -39,6 +39,8 @@ class AirCanvas:
         self.last_detected_shape: Optional[str] = None
         self.fps: float = 30.0
         self._last_time: float = time.time()
+        self.last_snap_time: float = 0.0
+        self.snap_feedback_time: float = 0.0
 
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         assets_path = assets_dir or os.path.join(base_dir, "assets")
@@ -207,6 +209,19 @@ class AirCanvas:
                 index_up = lms[8].y < lms[6].y
                 middle_up = lms[12].y < lms[10].y
 
+                # Finger Snap Gesture: Thumb tip touches Middle finger tip
+                snap_dist = float(np.hypot(thumb_pt[0] - middle_pt[0], thumb_pt[1] - middle_pt[1]))
+                pinch_dist = float(np.hypot(thumb_pt[0] - index_pt[0], thumb_pt[1] - index_pt[1]))
+
+                if snap_dist < 32.0 and pinch_dist > 36.0:
+                    if now - self.last_snap_time > 1.8:
+                        self.last_snap_time = now
+                        self.snap_feedback_time = now
+                        # Check if user drew anything on the canvas
+                        gray_check = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY) if self.canvas is not None else None
+                        if gray_check is not None and np.count_nonzero(gray_check) > 30:
+                            self.materialize_current()
+
                 interaction = self.object_mgr.update_hand_interaction(index_pt, thumb_pt)
                 if interaction["grabbed"]:
                     grabbed_object_name = interaction["grabbed"]
@@ -280,6 +295,13 @@ class AirCanvas:
 
         if self.show_palette:
             self._draw_palette(combined)
+
+        # On-screen visual feedback for Finger Snap gesture
+        if now - self.snap_feedback_time < 1.5:
+            # Draw glowing badge across top
+            cv2.rectangle(combined, (w // 2 - 210, 20), (w // 2 + 210, 64), (18, 21, 29), -1)
+            cv2.rectangle(combined, (w // 2 - 210, 20), (w // 2 + 210, 64), (255, 0, 255), 2)
+            cv2.putText(combined, "SNAP DETECTED! MATERIALIZING...", (w // 2 - 195, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 100, 255), 2, cv2.LINE_AA)
 
         # Streamlined lower telemetry strip
         cv2.putText(combined, f"{active_tool}  ·  {mode}  ·  {len(self.object_mgr.objects)} OBJECTS  ·  {self.fps:.1f} FPS", (20, h - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 210, 225), 1, cv2.LINE_AA)
