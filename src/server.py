@@ -21,7 +21,6 @@ class CanvasServerEngine:
         self.source = 0
         self.mirror = True
         self.stream: Optional[VideoStream] = None
-        # show_palette=False eliminates the ugly OpenCV top bar from the camera view
         self.canvas = AirCanvas(show_palette=False)
         self.latest_frame: Optional[np.ndarray] = None
         self.latest_telemetry = {}
@@ -99,7 +98,8 @@ HTML_TEMPLATE = """
             --border-strong: #333a4f;
             --text-primary: #f0f3f8;
             --text-secondary: #909bb0;
-            --accent-primary: #3b82f6;
+            --accent-primary: #2563eb;
+            --accent-hover: #1d4ed8;
             --radius-sm: 6px;
             --radius-md: 10px;
             --radius-lg: 14px;
@@ -169,7 +169,7 @@ HTML_TEMPLATE = """
             gap: 6px;
             font-size: 0.76rem;
             color: var(--text-secondary);
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            font-family: ui-monospace, monospace;
         }
 
         .status-dot {
@@ -197,18 +197,6 @@ HTML_TEMPLATE = """
             border-color: var(--border-strong);
         }
 
-        .key-badge-unconfigured {
-            background-color: #3b2020;
-            border-color: #7f2323;
-            color: #fca5a5;
-        }
-
-        .key-badge-connected {
-            background-color: #132e22;
-            border-color: #1d6d45;
-            color: #86efac;
-        }
-
         main {
             flex: 1;
             position: relative;
@@ -216,7 +204,7 @@ HTML_TEMPLATE = """
             align-items: center;
             justify-content: center;
             background: radial-gradient(circle at center, #11141f 0%, #08090d 100%);
-            padding: 24px;
+            padding: 20px;
             overflow: hidden;
         }
 
@@ -244,12 +232,11 @@ HTML_TEMPLATE = """
         /* Bottom Studio Dock */
         .bottom-dock {
             position: absolute;
-            bottom: 24px;
+            bottom: 22px;
             left: 50%;
             transform: translateX(-50%);
             background-color: rgba(18, 21, 29, 0.94);
             backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
             border: 1px solid var(--border-strong);
             border-radius: 40px;
             padding: 6px 14px;
@@ -299,13 +286,13 @@ HTML_TEMPLATE = """
             display: inline-block;
         }
 
-        /* Top-Right Generator Panel */
+        /* Right Generator Panel */
         .generator-panel {
             position: absolute;
-            top: 24px;
-            right: 24px;
+            top: 20px;
+            right: 20px;
             width: 320px;
-            background-color: rgba(18, 21, 29, 0.94);
+            background-color: rgba(18, 21, 29, 0.95);
             backdrop-filter: blur(16px);
             border: 1px solid var(--border-strong);
             border-radius: var(--radius-md);
@@ -333,10 +320,10 @@ HTML_TEMPLATE = """
 
         .panel-input-wrap {
             display: flex;
-            gap: 8px;
+            gap: 6px;
         }
 
-        input[type="text"], input[type="password"] {
+        input[type="text"] {
             flex: 1;
             background-color: var(--surface-2);
             border: 1px solid var(--border-subtle);
@@ -355,7 +342,7 @@ HTML_TEMPLATE = """
             background-color: #2563eb;
             color: #ffffff;
             border: none;
-            padding: 8px 12px;
+            padding: 8px 14px;
             border-radius: var(--radius-sm);
             font-size: 0.82rem;
             font-weight: 500;
@@ -364,7 +351,24 @@ HTML_TEMPLATE = """
         }
 
         .btn-primary:hover {
-            background-color: #1d4ed8;
+            background-color: var(--accent-hover);
+        }
+
+        .btn-materialize {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            color: #ffffff;
+            border: none;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 0.84rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: filter 0.15s;
+            width: 100%;
+        }
+
+        .btn-materialize:hover {
+            filter: brightness(1.15);
         }
 
         .btn-secondary {
@@ -416,28 +420,6 @@ HTML_TEMPLATE = """
             border-radius: var(--radius-sm);
             border-left: 3px solid var(--accent-primary);
         }
-
-        /* Settings Modal */
-        .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.75);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-        }
-
-        .modal-card {
-            width: 440px;
-            background-color: var(--surface-1);
-            border: 1px solid var(--border-strong);
-            border-radius: var(--radius-lg);
-            padding: 22px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
     </style>
 </head>
 <body>
@@ -445,7 +427,7 @@ HTML_TEMPLATE = """
     <header>
         <div class="header-brand">
             <span class="brand-title">AirCanvas Studio</span>
-            <span class="brand-pill">Gesture Perception & Generative Objects</span>
+            <span class="brand-pill">Gesture Perception & Generative Cutouts</span>
         </div>
 
         <div class="header-controls">
@@ -456,10 +438,6 @@ HTML_TEMPLATE = """
 
             <button class="ghost-button" onclick="toggleMirrorMode()">
                 Mirror: <span id="mirrorState">Selfie</span>
-            </button>
-
-            <button id="apiKeyBtn" class="ghost-button key-badge-unconfigured" onclick="openKeyModal()">
-                Gemini API: <span id="apiKeyLabel">Connect Key</span>
             </button>
         </div>
     </header>
@@ -472,47 +450,42 @@ HTML_TEMPLATE = """
         <!-- Studio Generative Object Panel -->
         <div class="generator-panel">
             <div class="panel-header">
-                <span class="panel-title">Nano Banana Generator</span>
+                <span class="panel-title">AI Object Studio</span>
                 <span id="objectCounter" style="font-size: 0.72rem; color: var(--text-secondary); font-family: monospace;">0 Objects</span>
             </div>
 
-            <!-- Inline API Key Input (Direct & Private on localhost) -->
-            <div id="keyConfigBox" style="background: var(--surface-2); border: 1px solid var(--border-strong); padding: 10px; border-radius: var(--radius-sm);">
-                <div style="font-size: 0.74rem; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
-                    Gemini API Key (stored locally in .env):
+            <!-- Primary Action 1: Materialize what you drew -->
+            <div>
+                <button class="btn-materialize" id="materializeBtn" onclick="materializeHandDrawing()">
+                    Materialize Hand Drawing
+                </button>
+                <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 4px; line-height: 1.3;">
+                    Draw a shape in the air (cube, sword, cup), then click above to turn it into a real 3D object!
                 </div>
-                <div style="display: flex; gap: 6px;">
-                    <input type="password" id="inlineKeyInput" placeholder="Paste AIzaSy... key" style="flex: 1; padding: 6px 8px; font-size: 0.78rem;" />
-                    <button class="btn-primary" style="padding: 6px 12px; font-size: 0.78rem;" onclick="saveInlineApiKey()">Connect</button>
+            </div>
+
+            <div style="border-top: 1px solid var(--border-subtle); padding-top: 8px;">
+                <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 6px;">
+                    Or type any object to generate cutout:
                 </div>
-            </div>
-
-            <div id="keyConnectedBox" style="display: none; font-size: 0.74rem; color: #86efac; background: #132e22; border: 1px solid #1d6d45; padding: 6px 10px; border-radius: var(--radius-sm); align-items: center; justify-content: space-between;">
-                <span>✓ Gemini API Connected (Nano Banana Active)</span>
-                <button class="btn-secondary" style="padding: 2px 6px; font-size: 0.68rem;" onclick="showKeyEdit()">Change</button>
-            </div>
-
-            <div style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.35;">
-                Enter any object to synthesize a realistic transparent cutout:
-            </div>
-
-            <div class="panel-input-wrap">
-                <input type="text" id="objectPrompt" placeholder="Object (e.g. airpods, cricket bat, guitar)" />
-                <button class="btn-primary" id="createBtn" onclick="materializePrompt()">Create</button>
+                <div class="panel-input-wrap">
+                    <input type="text" id="objectPrompt" placeholder="e.g. 3d glass cube, airpods, sword" />
+                    <button class="btn-primary" id="createBtn" onclick="materializePrompt()">Create</button>
+                </div>
             </div>
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Authentic Cutouts</span>
+                <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Quick Cutouts</span>
                 <button class="btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: #f87171;" onclick="clearObjects()">Clear Objects</button>
             </div>
 
             <div class="chip-grid">
+                <div class="chip" onclick="spawnCutout('cube')">3D Cube</div>
                 <div class="chip" onclick="spawnCutout('airpods')">AirPods</div>
                 <div class="chip" onclick="spawnCutout('cricket bat')">Cricket Bat</div>
                 <div class="chip" onclick="spawnCutout('guitar')">Guitar</div>
                 <div class="chip" onclick="spawnCutout('sunglasses')">Sunglasses</div>
                 <div class="chip" onclick="spawnCutout('banana')">Banana</div>
-                <div class="chip" onclick="spawnCutout('crown')">Crown</div>
             </div>
 
             <div class="instruction-note">
@@ -558,23 +531,6 @@ HTML_TEMPLATE = """
         </div>
     </main>
 
-    <!-- API Key Settings Modal -->
-    <div id="keyModal" class="modal-overlay">
-        <div class="modal-card">
-            <div style="font-size: 1rem; font-weight: 600;">Connect Gemini API Key</div>
-            <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45;">
-                Please paste your Google AI Studio Gemini API key below. This connects Google Imagen 3 (Nano Banana) to generate photorealistic AI cutouts from any prompt or drawing, and automatically persists to your local environment.
-            </div>
-
-            <input type="password" id="modalKeyInput" placeholder="AIzaSy..." />
-
-            <div style="display: flex; justify-content: flex-end; gap: 8px;">
-                <button class="btn-secondary" onclick="closeKeyModal()">Cancel</button>
-                <button class="btn-primary" onclick="saveApiKey()">Save & Connect</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         let isMirror = true;
 
@@ -599,21 +555,42 @@ HTML_TEMPLATE = """
             });
         }
 
+        async function materializeHandDrawing() {
+            const btn = document.getElementById("materializeBtn");
+            const originalText = btn.innerText;
+            btn.innerText = "Analyzing Drawing...";
+            btn.disabled = true;
+
+            try {
+                const res = await fetch("/api/materialize_drawing", { method: "POST" });
+                const data = await res.json();
+                if (data.status === "ok") {
+                    console.log("Materialized from sketch:", data.materialized);
+                } else {
+                    alert(data.message || "Please draw something on screen first!");
+                }
+            } catch (e) {
+                console.error("Error materializing sketch:", e);
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
         async function materializePrompt() {
             const prompt = document.getElementById("objectPrompt").value.trim();
             if (!prompt) return;
             const btn = document.getElementById("createBtn");
             const originalText = btn.innerText;
-            btn.innerText = "Generating...";
+            btn.innerText = "...";
             btn.disabled = true;
 
             try {
-                const res = await fetch("/api/materialize", {
+                await fetch("/api/materialize", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ prompt: prompt })
                 });
-                const data = await res.json();
                 document.getElementById("objectPrompt").value = "";
             } catch (e) {
                 console.error("Error creating object:", e);
@@ -647,73 +624,12 @@ HTML_TEMPLATE = """
             }
         }
 
-        function openKeyModal() {
-            document.getElementById("keyModal").style.display = "flex";
-        }
-
-        function closeKeyModal() {
-            document.getElementById("keyModal").style.display = "none";
-        }
-
-        async function saveInlineApiKey() {
-            const key = document.getElementById("inlineKeyInput").value.trim();
-            if (!key) return;
-            const res = await fetch("/api/set_api_key", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ key: key })
-            });
-            const data = await res.json();
-            if (data.status === "ok") {
-                document.getElementById("keyConfigBox").style.display = "none";
-                document.getElementById("keyConnectedBox").style.display = "flex";
-                const btn = document.getElementById("apiKeyBtn");
-                btn.className = "ghost-button key-badge-connected";
-                document.getElementById("apiKeyLabel").innerText = "Connected";
-            }
-        }
-
-        function showKeyEdit() {
-            document.getElementById("keyConfigBox").style.display = "block";
-            document.getElementById("keyConnectedBox").style.display = "none";
-        }
-
-        async function saveApiKey() {
-            const key = document.getElementById("modalKeyInput").value.trim();
-            if (!key) return;
-            const res = await fetch("/api/set_api_key", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ key: key })
-            });
-            const data = await res.json();
-            if (data.status === "ok") {
-                const btn = document.getElementById("apiKeyBtn");
-                btn.className = "ghost-button key-badge-connected";
-                document.getElementById("apiKeyLabel").innerText = "Connected";
-                closeKeyModal();
-            }
-        }
-
         setInterval(async () => {
             try {
                 const res = await fetch("/api/status");
                 const data = await res.json();
                 document.getElementById("fpsIndicator").innerText = (data.fps || 30.0).toFixed(1) + " FPS";
                 document.getElementById("objectCounter").innerText = `${data.objects_count || 0} Objects`;
-
-                const btn = document.getElementById("apiKeyBtn");
-                if (data.has_api_key) {
-                    btn.className = "ghost-button key-badge-connected";
-                    document.getElementById("apiKeyLabel").innerText = "Connected";
-                    document.getElementById("keyConnectedBox").style.display = "flex";
-                    document.getElementById("keyConfigBox").style.display = "none";
-                } else {
-                    btn.className = "ghost-button key-badge-unconfigured";
-                    document.getElementById("apiKeyLabel").innerText = "Connect Key";
-                    document.getElementById("keyConnectedBox").style.display = "none";
-                    document.getElementById("keyConfigBox").style.display = "block";
-                }
 
                 document.querySelectorAll(".dock-tool[data-tool]").forEach(b => {
                     b.classList.toggle("active", b.getAttribute("data-tool") === data.active_tool);
@@ -779,6 +695,16 @@ def clear_objects_endpoint():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/materialize_drawing", methods=["POST"])
+def materialize_drawing_endpoint():
+    with engine.lock:
+        obj = engine.canvas.materialize_current(hint=None)
+        name = obj.name if obj else None
+    if obj:
+        return jsonify({"status": "ok", "materialized": name})
+    return jsonify({"status": "error", "message": "No drawing detected. Draw on the screen first!"})
+
+
 @app.route("/api/materialize", methods=["POST"])
 def materialize_endpoint():
     data = request.get_json(force=True)
@@ -791,7 +717,7 @@ def materialize_endpoint():
 
 @app.route("/api/spawn", methods=["POST"])
 def spawn_endpoint():
-    name = request.get_json(force=True).get("name", "apple")
+    name = request.get_json(force=True).get("name", "cube")
     with engine.lock:
         engine.canvas.spawn_object(name)
     return jsonify({"status": "ok"})

@@ -1,114 +1,110 @@
 """
 Gemini Sketch Recognizer for AirCanvas Magic Pencil.
-Identifies hand-drawn sketches to automatically materialize them into realistic objects.
+Uses gemini-3.1-flash-lite REST API to analyze and identify hand sketches in real time.
 """
 
 import os
 import sys
-from typing import Optional, List
+import json
+import base64
+import urllib.request
+import urllib.parse
+from typing import Optional
 import numpy as np
 import cv2
 from PIL import Image
+import io
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 class GeminiSketchRecognizer:
-    MODEL_CANDIDATES = [
+    VISION_MODELS = [
+        "gemini-3.1-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-001",
-        "gemini-1.5-pro",
     ]
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.active_model_name: Optional[str] = None
-        self._model = None
-        self._discovered_models: List[str] = []
-        if self.api_key:
-            self._init_client()
 
-    def set_api_key(self, api_key: str) -> bool:
+    def set_api_key(self, api_key: str):
         self.api_key = api_key.strip()
-        return self._init_client()
-
-    def _init_client(self) -> bool:
-        if not self.api_key:
-            self._model = None
-            return False
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=self.api_key)
-
-            self._discovered_models = []
-            try:
-                for m in genai.list_models():
-                    if "generateContent" in m.supported_generation_methods:
-                        self._discovered_models.append(m.name.replace("models/", ""))
-            except Exception:
-                pass
-
-            chosen = None
-            for cand in self.MODEL_CANDIDATES:
-                if cand in self._discovered_models:
-                    chosen = cand
-                    break
-
-            if not chosen:
-                chosen = self._discovered_models[0] if self._discovered_models else self.MODEL_CANDIDATES[0]
-
-            self.active_model_name = chosen
-            self._model = genai.GenerativeModel(chosen)
-            return True
-        except Exception as e:
-            print(f"[GeminiSketch] Init error: {e}", file=sys.stderr)
-            self._model = None
-            return False
 
     def is_configured(self) -> bool:
-        return self._model is not None and bool(self.api_key)
+        return bool(self.api_key and len(self.api_key) > 10)
 
     def identify_sketch(self, canvas_drawing: np.ndarray) -> str:
-        """Analyze drawing and return the identified object name."""
+        """Analyze drawing via Gemini vision REST API and return the concise identified object name."""
         if not self.is_configured():
-            return "banana"
+            return "cube"
 
-        # Check if drawing has enough strokes
+        # Check if drawing has sufficient stroke data
         gray = cv2.cvtColor(canvas_drawing, cv2.COLOR_BGR2GRAY)
-        if np.count_nonzero(gray) < 100:
-            return "banana"
+        if np.count_nonzero(gray) < 40:
+            return "cube"
 
-        prompt = """Look at this stroke drawing drawn in the air.
-In 1 to 2 words, what everyday object does this outline resemble?
-Examples: banana, sunglasses, crown, apple, pizza, flower, cup, star.
-Reply ONLY with the lowercase name of the object."""
+        try:
+            # Crop to drawing bounding box
+            pts = cv2.findNonZero(gray)
+            if pts is not None:
+                x, y, w, h = cv2.boundingRect(pts)
+                pad = 20
+                h_img, w_img = canvas_drawing.shape[:2]
+                x1, y1 = max(0, x - pad), max(0, y - pad)
+                x2, y2 = min(w_img, x + w + pad), min(h_img, y + h + pad)
+                cropped = canvas_drawing[y1:y2, x1:x2]
+            else:
+                cropped = canvas_drawing
 
-        import google.generativeai as genai
-        # Convert black canvas to white background for clear sketch contrast
-        inv_canvas = 255 - canvas_drawing
-        pil_img = Image.fromarray(cv2.cvtColor(inv_canvas, cv2.COLOR_BGR2RGB))
+            # Invert so black strokes on clean white background are easily read by vision model
+            inverted = 255 - cropped
+            pil_img = Image.fromarray(cv2.cvtColor(inverted, cv2.COLOR_BGR2RGB))
+            buf = io.BytesIO()
+            pil_img.save(buf, format="JPEG", quality=85)
+            b64_img = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-        trials = [self.active_model_name] if self.active_model_name else []
-        for m in self._discovered_models + self.MODEL_CANDIDATES:
-            if m not in trials:
-                trials.append(m)
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {
+                            "text": (
+                                "Look at this simple outline drawing sketched in mid-air. "
+                                "Identify what single physical object was drawn (for example: cube, banana, cricket bat, airpods, sword, apple, car, sunglasses). "
+                                "Reply with ONLY 1 to 2 words naming the object in lowercase."
+                            )
+                        },
+                        {
+                            "inline_data": {
+                                "mime_type": "image/jpeg",
+                                "data": b64_img
+                            }
+                        }
+                    ]
+                }]
+            }
 
-        for m_name in trials:
-            if not m_name:
-                continue
-            try:
-                m_inst = genai.GenerativeModel(m_name)
-                resp = m_inst.generate_content([prompt, pil_img])
-                if resp and resp.text:
-                    clean = resp.text.strip().lower().replace(".", "").replace('"', '').replace("'", "")
-                    return clean
-            except Exception as err:
-                if "404" in str(err) or "not found" in str(err):
+            for m in self.VISION_MODELS:
+                try:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={self.api_key}"
+                    req = urllib.request.Request(
+                        url,
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST"
+                    )
+                    with urllib.request.urlopen(req, timeout=8) as resp:
+                        res_data = json.loads(resp.read().decode("utf-8"))
+                        text = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        clean = text.lower().replace(".", "").replace('"', '').replace("'", "").replace("a ", "").replace("an ", "")
+                        if clean:
+                            return clean
+                except Exception:
                     continue
-                break
 
-        return "banana"
+        except Exception as e:
+            print(f"[GeminiSketch] Error identifying sketch: {e}", file=sys.stderr)
+
+        return "cube"
