@@ -78,52 +78,79 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AirCanvas - Touchless Gesture Drawing</title>
+    <title>AirCanvas - Magic Pencil & Touchless Drawing</title>
     <style>
-        body { background-color: #0d1117; color: #c9d1d9; font-family: sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
-        aside { width: 300px; background-color: #161b22; padding: 20px; border-right: 1px solid #30363d; display: flex; flex-direction: column; gap: 14px; }
+        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        aside { width: 320px; background-color: #161b22; padding: 18px; border-right: 1px solid #30363d; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; flex-shrink: 0; }
         main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
-        .video-box { max-width: 960px; width: 100%; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+        .video-box { max-width: 920px; width: 100%; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; position: relative; }
         img { width: 100%; display: block; }
         .pill-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-        button { background-color: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 8px; border-radius: 6px; cursor: pointer; }
+        button { background-color: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 7px; border-radius: 6px; cursor: pointer; font-size: 0.82rem; transition: all 0.15s; }
         button:hover { background-color: #30363d; }
-        button.active { border-color: #58a6ff; color: #58a6ff; font-weight: bold; }
-        .action-btn { background-color: #238636; color: white; width: 100%; margin-top: 6px; }
+        button.active { border-color: #58a6ff; color: #58a6ff; font-weight: bold; background-color: #1f2937; }
+        .magic-btn { background: linear-gradient(135deg, #8a2be2, #ff1493); color: white; border: none; font-weight: bold; padding: 9px; border-radius: 6px; cursor: pointer; width: 100%; }
+        .magic-btn:hover { filter: brightness(1.15); }
+        .action-btn { background-color: #238636; color: white; width: 100%; margin-top: 4px; font-weight: 500; }
         .action-btn:hover { background-color: #2ea043; }
+        .hint-box { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px; font-size: 0.76rem; line-height: 1.4; color: #8b949e; }
+        .hint-box b { color: #58a6ff; }
     </style>
 </head>
 <body>
     <aside>
-        <h2>AirCanvas</h2>
-        <p style="font-size: 0.8rem; color: #8b949e;">Touchless AI Drawing & Shape Snapping</p>
+        <div>
+            <h2 style="font-size: 1.2rem; color: #fff; margin-bottom: 2px;">AirCanvas Magic Studio</h2>
+            <p style="font-size: 0.78rem; color: #8b949e;">Touchless Gesture Drawing & Real Object Materializer</p>
+        </div>
         
         <div>
-            <label style="font-size: 0.8rem; color: #8b949e;">Select Tool / Color</label>
+            <label style="font-size: 0.75rem; text-transform: uppercase; color: #8b949e; font-weight: 600;">Drawing Tools</label>
             <div class="pill-grid" style="margin-top: 6px;">
                 <button onclick="setTool('CYAN')" class="active tool-btn" id="btnCYAN">Cyan</button>
                 <button onclick="setTool('PURPLE')" class="tool-btn" id="btnPURPLE">Purple</button>
                 <button onclick="setTool('GREEN')" class="tool-btn" id="btnGREEN">Green</button>
                 <button onclick="setTool('AMBER')" class="tool-btn" id="btnAMBER">Amber</button>
-                <button onclick="setTool('RED')" class="tool-btn" id="btnRED">Red</button>
+                <button onclick="setTool('MAGIC')" class="tool-btn" id="btnMAGIC" style="color: #ff69b4; font-weight: bold;">✨ Magic</button>
                 <button onclick="setTool('ERASER')" class="tool-btn" id="btnERASER">Eraser</button>
             </div>
         </div>
 
-        <div>
-            <label style="font-size: 0.8rem; color: #8b949e;">Camera Input</label>
-            <select onchange="setSource(this.value)" style="width: 100%; padding: 6px; background: #0d1117; color: white; border: 1px solid #30363d; border-radius: 6px; margin-top: 4px;">
+        <div style="border-top: 1px solid #30363d; padding-top: 10px;">
+            <label style="font-size: 0.75rem; text-transform: uppercase; color: #8b949e; font-weight: 600;">✨ Magic Pencil: Materialize</label>
+            <button class="magic-btn" onclick="materializeDrawing()" style="margin-top: 6px;">✨ Materialize My Drawing</button>
+            <div style="font-size: 0.75rem; color: #8b949e; margin-top: 6px;">Or spawn instant interactive object:</div>
+            <div class="pill-grid" style="margin-top: 6px;">
+                <button onclick="spawnObject('banana')">🍌 Banana</button>
+                <button onclick="spawnObject('sunglasses')">🕶️ Glasses</button>
+                <button onclick="spawnObject('crown')">👑 Crown</button>
+                <button onclick="spawnObject('apple')">🍎 Apple</button>
+                <button onclick="spawnObject('pizza')">🍕 Pizza</button>
+                <button onclick="clearObjects()" style="color: #da3633;">🗑️ Clear</button>
+            </div>
+        </div>
+
+        <div class="hint-box">
+            <b>🎮 How to Play with Objects:</b><br>
+            • Draw a shape in the air with the <b>✨ Magic</b> tool.<br>
+            • It instantly materializes into a real transparent object!<br>
+            • <b>Pinch</b> your index finger and thumb together near the object to <b>grab and move</b> it anywhere on screen!
+        </div>
+
+        <div style="border-top: 1px solid #30363d; padding-top: 10px;">
+            <label style="font-size: 0.75rem; text-transform: uppercase; color: #8b949e; font-weight: 600;">Camera Settings</label>
+            <select onchange="setSource(this.value)" style="width: 100%; padding: 6px; background: #0d1117; color: white; border: 1px solid #30363d; border-radius: 6px; margin-top: 4px; font-size: 0.8rem;">
                 <option value="0">Webcam</option>
                 <option value="synthetic">Synthetic Stream</option>
             </select>
         </div>
 
         <div style="display: flex; justify-content: space-between; align-items: center;">
-            <label for="mirrorBox" style="font-size: 0.85rem; cursor: pointer;">Mirror Camera</label>
-            <input type="checkbox" id="mirrorBox" checked onchange="setMirror(this.checked)" />
+            <label for="mirrorBox" style="font-size: 0.8rem; cursor: pointer;">Mirror Camera (Selfie View)</label>
+            <input type="checkbox" id="mirrorBox" checked onchange="setMirror(this.checked)" style="width: 16px; height: 16px; cursor: pointer;" />
         </div>
 
-        <button class="action-btn" onclick="clearCanvas()">Clear Canvas</button>
+        <button class="action-btn" onclick="clearCanvas()">Clear Stroke Lines</button>
         <button class="action-btn" style="background-color: #1f6feb;" onclick="saveSnapshot()">Save Snapshot</button>
     </aside>
 
@@ -131,8 +158,8 @@ HTML_TEMPLATE = """
         <div class="video-box">
             <img src="/video_feed" alt="AirCanvas Stream" />
         </div>
-        <div style="margin-top: 12px; font-family: monospace; font-size: 0.9rem; color: #3fb950;" id="statusBadge">
-            30.0 FPS | TOOL: CYAN | MODE: HOVER
+        <div style="margin-top: 10px; font-family: monospace; font-size: 0.88rem; color: #3fb950;" id="statusBadge">
+            30.0 FPS | TOOL: CYAN | MODE: HOVER | OBJECTS: 0
         </div>
     </main>
 
@@ -150,19 +177,39 @@ HTML_TEMPLATE = """
         async function clearCanvas() {
             await fetch("/api/clear", { method: "POST" });
         }
+        async function clearObjects() {
+            await fetch("/api/clear_objects", { method: "POST" });
+        }
+        async function materializeDrawing() {
+            const res = await fetch("/api/materialize", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ hint: "banana" }) });
+            const data = await res.json();
+            if (data.status === "ok") {
+                console.log("Materialized:", data.materialized);
+            }
+        }
+        async function spawnObject(name) {
+            await fetch("/api/spawn", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ name: name }) });
+        }
         async function saveSnapshot() {
             const res = await fetch("/api/snapshot", { method: "POST" });
             const data = await res.json();
             alert("Snapshot saved: " + data.filename);
         }
+
         setInterval(async () => {
             try {
                 const res = await fetch("/api/status");
                 const data = await res.json();
-                document.getElementById("statusBadge").innerText = `${data.fps} FPS | TOOL: ${data.active_tool} | MODE: ${data.mode}` + (data.snapped_shape ? ` | SNAPPED: ${data.snapped_shape.toUpperCase()}` : "");
+                let txt = `${data.fps} FPS | TOOL: ${data.active_tool} | MODE: ${data.mode} | OBJECTS: ${data.objects_count || 0}`;
+                if (data.grabbed_object) {
+                    txt += ` | PLAYING WITH: ${data.grabbed_object.toUpperCase()}`;
+                } else if (data.snapped_shape) {
+                    txt += ` | SNAPPED: ${data.snapped_shape.toUpperCase()}`;
+                }
+                document.getElementById("statusBadge").innerText = txt;
                 document.querySelectorAll(".tool-btn").forEach(b => b.classList.toggle("active", b.id === "btn" + data.active_tool));
             } catch (e) {}
-        }, 200);
+        }, 180);
     </script>
 </body>
 </html>
@@ -219,6 +266,30 @@ def set_mirror_endpoint():
 def clear_endpoint():
     with engine.lock:
         engine.canvas.reset()
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/clear_objects", methods=["POST"])
+def clear_objects_endpoint():
+    with engine.lock:
+        engine.canvas.object_mgr.clear()
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/materialize", methods=["POST"])
+def materialize_endpoint():
+    hint = request.get_json(force=True).get("hint", "banana")
+    with engine.lock:
+        obj = engine.canvas.materialize_current(hint=hint)
+        mat_name = obj.name if obj else "banana"
+    return jsonify({"status": "ok", "materialized": mat_name})
+
+
+@app.route("/api/spawn", methods=["POST"])
+def spawn_endpoint():
+    name = request.get_json(force=True).get("name", "banana")
+    with engine.lock:
+        engine.canvas.spawn_object(name)
     return jsonify({"status": "ok"})
 
 

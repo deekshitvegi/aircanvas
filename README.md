@@ -9,7 +9,9 @@ AirCanvas allows users to draw in mid-air using hand gestures captured by a stan
 ## Features
 
 - **Fingertip Drawing**: Tracks the index fingertip landmark to render smooth strokes on a persistent canvas layer.
-- **Smart Tool Selection**: Switch between Cyan, Purple, Green, Amber, Red, and Eraser via on-screen buttons, hand gestures, or web UI controls.
+- **✨ Magic Pencil (Turn Drawing into Real Object)**: Draw an outline in the air (e.g. banana, sunglasses, crown, apple, pizza) and watch it instantly materialize into a realistic transparent cutout object right where you drew it.
+- **🎮 Play & Grab Objects in Mid-Air**: Pinch your index finger and thumb together near any materialized object to grab, drag, and move it across the room in real time.
+- **Smart Tool Selection**: Switch between Cyan, Purple, Green, Amber, Magic, and Eraser via on-screen buttons, hand gestures, or web UI controls.
 - **Automatic Shape Regularization**: Hand-drawn strokes resembling circles, rectangles, or lines automatically snap to clean geometric primitives.
 - **Dual Perspective**: Natural selfie mirroring toggle ensures natural drawing motion.
 - **Real-Time Web Interface**: Delivers 30 FPS multipart streaming in modern browsers with low latency.
