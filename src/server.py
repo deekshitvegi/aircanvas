@@ -476,8 +476,24 @@ HTML_TEMPLATE = """
                 <span id="objectCounter" style="font-size: 0.72rem; color: var(--text-secondary); font-family: monospace;">0 Objects</span>
             </div>
 
+            <!-- Inline API Key Input (Direct & Private on localhost) -->
+            <div id="keyConfigBox" style="background: var(--surface-2); border: 1px solid var(--border-strong); padding: 10px; border-radius: var(--radius-sm);">
+                <div style="font-size: 0.74rem; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
+                    Gemini API Key (stored locally in .env):
+                </div>
+                <div style="display: flex; gap: 6px;">
+                    <input type="password" id="inlineKeyInput" placeholder="Paste AIzaSy... key" style="flex: 1; padding: 6px 8px; font-size: 0.78rem;" />
+                    <button class="btn-primary" style="padding: 6px 12px; font-size: 0.78rem;" onclick="saveInlineApiKey()">Connect</button>
+                </div>
+            </div>
+
+            <div id="keyConnectedBox" style="display: none; font-size: 0.74rem; color: #86efac; background: #132e22; border: 1px solid #1d6d45; padding: 6px 10px; border-radius: var(--radius-sm); align-items: center; justify-content: space-between;">
+                <span>✓ Gemini API Connected (Nano Banana Active)</span>
+                <button class="btn-secondary" style="padding: 2px 6px; font-size: 0.68rem;" onclick="showKeyEdit()">Change</button>
+            </div>
+
             <div style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.35;">
-                Enter any object to synthesize a realistic transparent cutout via Nano Banana:
+                Enter any object to synthesize a realistic transparent cutout:
             </div>
 
             <div class="panel-input-wrap">
@@ -639,6 +655,29 @@ HTML_TEMPLATE = """
             document.getElementById("keyModal").style.display = "none";
         }
 
+        async function saveInlineApiKey() {
+            const key = document.getElementById("inlineKeyInput").value.trim();
+            if (!key) return;
+            const res = await fetch("/api/set_api_key", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: key })
+            });
+            const data = await res.json();
+            if (data.status === "ok") {
+                document.getElementById("keyConfigBox").style.display = "none";
+                document.getElementById("keyConnectedBox").style.display = "flex";
+                const btn = document.getElementById("apiKeyBtn");
+                btn.className = "ghost-button key-badge-connected";
+                document.getElementById("apiKeyLabel").innerText = "Connected";
+            }
+        }
+
+        function showKeyEdit() {
+            document.getElementById("keyConfigBox").style.display = "block";
+            document.getElementById("keyConnectedBox").style.display = "none";
+        }
+
         async function saveApiKey() {
             const key = document.getElementById("modalKeyInput").value.trim();
             if (!key) return;
@@ -667,9 +706,13 @@ HTML_TEMPLATE = """
                 if (data.has_api_key) {
                     btn.className = "ghost-button key-badge-connected";
                     document.getElementById("apiKeyLabel").innerText = "Connected";
+                    document.getElementById("keyConnectedBox").style.display = "flex";
+                    document.getElementById("keyConfigBox").style.display = "none";
                 } else {
                     btn.className = "ghost-button key-badge-unconfigured";
                     document.getElementById("apiKeyLabel").innerText = "Connect Key";
+                    document.getElementById("keyConnectedBox").style.display = "none";
+                    document.getElementById("keyConfigBox").style.display = "block";
                 }
 
                 document.querySelectorAll(".dock-tool[data-tool]").forEach(b => {
@@ -757,9 +800,11 @@ def spawn_endpoint():
 @app.route("/api/set_api_key", methods=["POST"])
 def set_api_key_endpoint():
     key = request.get_json(force=True).get("key", "").strip()
+    if not key:
+        return jsonify({"status": "error", "message": "Key cannot be empty"}), 400
     with engine.lock:
         engine.canvas.set_api_key(key)
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "message": "API Key saved locally and active!"})
 
 
 @app.route("/api/snapshot", methods=["POST"])
