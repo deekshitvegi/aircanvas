@@ -23,6 +23,7 @@ class CanvasServerEngine:
         self.stream: Optional[VideoStream] = None
         self.canvas = AirCanvas(show_palette=False)
         self.latest_frame: Optional[np.ndarray] = None
+        self.latest_jpeg: Optional[bytes] = None
         self.latest_telemetry = {}
         self.is_running = True
 
@@ -64,19 +65,20 @@ class CanvasServerEngine:
             if self.mirror:
                 frame = cv2.flip(frame, 1)
 
+            out, tel = self.canvas.process_frame(frame)
+            ret_enc, jpeg = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 80])
+
             with self.lock:
-                out, tel = self.canvas.process_frame(frame)
                 self.latest_frame = out
                 self.latest_telemetry = tel
+                if ret_enc:
+                    self.latest_jpeg = jpeg.tobytes()
 
             time.sleep(0.005)
 
     def get_jpeg(self):
         with self.lock:
-            if self.latest_frame is None:
-                return None
-            ret, jpeg = cv2.imencode(".jpg", self.latest_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            return jpeg.tobytes() if ret else None
+            return self.latest_jpeg
 
 
 engine = CanvasServerEngine()
@@ -223,10 +225,11 @@ HTML_TEMPLATE = """
             justify-content: center;
         }
 
-        .canvas-frame img {
+        canvas#videoCanvas {
             width: 100%;
             height: 100%;
             object-fit: contain;
+            display: block;
         }
 
         /* Bottom Studio Dock */
@@ -444,7 +447,7 @@ HTML_TEMPLATE = """
 
     <main>
         <div class="canvas-frame">
-            <img src="/video_feed" alt="Studio Stream" />
+            <canvas id="videoCanvas" width="854" height="480"></canvas>
         </div>
 
         <!-- Studio Generative Object Panel -->
@@ -454,22 +457,22 @@ HTML_TEMPLATE = """
                 <span id="objectCounter" style="font-size: 0.72rem; color: var(--text-secondary); font-family: monospace;">0 Objects</span>
             </div>
 
-            <!-- Primary Action 1: Materialize what you drew -->
+            <!-- Primary Action: Materialize Drawing -->
             <div>
                 <button class="btn-materialize" id="materializeBtn" onclick="materializeHandDrawing()">
                     Materialize Hand Drawing
                 </button>
                 <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 4px; line-height: 1.3;">
-                    Draw a shape in the air (cube, sword, cup), then click above to turn it into a real 3D object!
+                    Or <strong>snap fingers in air</strong> (Thumb + Middle finger) to turn sketch into real 3D object!
                 </div>
             </div>
 
             <div style="border-top: 1px solid var(--border-subtle); padding-top: 8px;">
                 <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 6px;">
-                    Or type any object to generate cutout:
+                    Or type any object to generate:
                 </div>
                 <div class="panel-input-wrap">
-                    <input type="text" id="objectPrompt" placeholder="e.g. 3d glass cube, airpods, sword" />
+                    <input type="text" id="objectPrompt" placeholder="e.g. butterfly, 3d cube, sword" />
                     <button class="btn-primary" id="createBtn" onclick="materializePrompt()">Create</button>
                 </div>
             </div>
@@ -480,20 +483,20 @@ HTML_TEMPLATE = """
             </div>
 
             <div class="chip-grid">
-                <div class="chip" onclick="spawnCutout('iphone')">iPhone</div>
+                <div class="chip" onclick="spawnCutout('butterfly')">Butterfly</div>
                 <div class="chip" onclick="spawnCutout('cube')">3D Cube</div>
+                <div class="chip" onclick="spawnCutout('iphone')">iPhone</div>
+                <div class="chip" onclick="spawnCutout('sword')">Sword</div>
                 <div class="chip" onclick="spawnCutout('airpods')">AirPods</div>
                 <div class="chip" onclick="spawnCutout('cricket bat')">Cricket Bat</div>
-                <div class="chip" onclick="spawnCutout('guitar')">Guitar</div>
-                <div class="chip" onclick="spawnCutout('sunglasses')">Sunglasses</div>
             </div>
 
             <div class="instruction-note">
                 <div style="margin-bottom: 6px;">
-                    <strong>Finger Snap:</strong> Touch your <strong>Thumb & Middle finger</strong> together in the air to instantly turn your drawing into a real 3D object!
+                    <strong>Finger Snap:</strong> Touch your <strong>Thumb & Middle finger</strong> together in the air to turn your sketch into an AI object!
                 </div>
                 <div>
-                    <strong>Mid-Air Grab:</strong> Pinch your <strong>Thumb & Index finger</strong> together near any object to pick it up and move it.
+                    <strong>Mid-Air Grab:</strong> Pinch your <strong>Thumb & Index finger</strong> together near any object to move it.
                 </div>
             </div>
         </div>
@@ -538,6 +541,30 @@ HTML_TEMPLATE = """
 
     <script>
         let isMirror = true;
+        const canvas = document.getElementById("videoCanvas");
+        const ctx = canvas.getContext("2d");
+        let isFetching = false;
+
+        // Rock-Solid HTML5 Canvas Render Loop - Zero Browser Socket Freezes
+        function streamLoop() {
+            if (isFetching) {
+                requestAnimationFrame(streamLoop);
+                return;
+            }
+            isFetching = true;
+            const img = new Image();
+            img.onload = () => {
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                isFetching = false;
+                requestAnimationFrame(streamLoop);
+            };
+            img.onerror = () => {
+                isFetching = false;
+                setTimeout(() => requestAnimationFrame(streamLoop), 80);
+            };
+            img.src = "/frame.jpg?t=" + Date.now();
+        }
+        requestAnimationFrame(streamLoop);
 
         async function selectTool(tool) {
             document.querySelectorAll(".dock-tool[data-tool]").forEach(b => {
@@ -567,18 +594,14 @@ HTML_TEMPLATE = """
             btn.disabled = true;
 
             try {
-                const res = await fetch("/api/materialize_drawing", { method: "POST" });
-                const data = await res.json();
-                if (data.status === "ok") {
-                    console.log("Materialized from sketch:", data.materialized);
-                } else {
-                    alert(data.message || "Please draw something on screen first!");
-                }
+                await fetch("/api/materialize_drawing", { method: "POST" });
             } catch (e) {
                 console.error("Error materializing sketch:", e);
             } finally {
-                btn.innerText = originalText;
-                btn.disabled = false;
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.disabled = false;
+                }, 1000);
             }
         }
 
@@ -600,8 +623,10 @@ HTML_TEMPLATE = """
             } catch (e) {
                 console.error("Error creating object:", e);
             } finally {
-                btn.innerText = originalText;
-                btn.disabled = false;
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.disabled = false;
+                }, 1000);
             }
         }
 
@@ -640,7 +665,7 @@ HTML_TEMPLATE = """
                     b.classList.toggle("active", b.getAttribute("data-tool") === data.active_tool);
                 });
             } catch (e) {}
-        }, 200);
+        }, 300);
     </script>
 </body>
 </html>
@@ -652,16 +677,27 @@ def index():
     return render_template_string(HTML_TEMPLATE)
 
 
-def gen():
-    while True:
-        b = engine.get_jpeg()
-        if b:
-            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + b + b"\r\n")
-        time.sleep(0.03)
+@app.route("/frame.jpg")
+def get_frame():
+    jpeg = engine.get_jpeg()
+    if jpeg is not None:
+        resp = Response(jpeg, mimetype="image/jpeg")
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
+    return ("", 204)
 
 
 @app.route("/video_feed")
 def video_feed():
+    # Keep video_feed as secondary fallback
+    def gen():
+        while True:
+            b = engine.get_jpeg()
+            if b:
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + b + b"\r\n")
+            time.sleep(0.033)
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
@@ -718,7 +754,7 @@ def materialize_endpoint():
 
 @app.route("/api/spawn", methods=["POST"])
 def spawn_endpoint():
-    name = request.get_json(force=True).get("name", "cube")
+    name = request.get_json(force=True).get("name", "butterfly")
     with engine.lock:
         engine.canvas.spawn_object(name)
     return jsonify({"status": "ok"})
