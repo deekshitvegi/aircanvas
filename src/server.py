@@ -703,11 +703,8 @@ def clear_objects_endpoint():
 @app.route("/api/materialize_drawing", methods=["POST"])
 def materialize_drawing_endpoint():
     with engine.lock:
-        obj = engine.canvas.materialize_current(hint=None)
-        name = obj.name if obj else None
-    if obj:
-        return jsonify({"status": "ok", "materialized": name})
-    return jsonify({"status": "error", "message": "No drawing detected. Draw on the screen first!"})
+        engine.canvas.materialize_current(hint=None)
+    return jsonify({"status": "ok", "message": "Synthesizing AI object in background"})
 
 
 @app.route("/api/materialize", methods=["POST"])
@@ -715,9 +712,8 @@ def materialize_endpoint():
     data = request.get_json(force=True)
     prompt = data.get("prompt") or data.get("hint")
     with engine.lock:
-        obj = engine.canvas.materialize_current(hint=prompt)
-        name = obj.name if obj else "object"
-    return jsonify({"status": "ok", "materialized": name})
+        engine.canvas.materialize_current(hint=prompt)
+    return jsonify({"status": "ok", "message": f"Synthesizing {prompt} in background"})
 
 
 @app.route("/api/spawn", methods=["POST"])

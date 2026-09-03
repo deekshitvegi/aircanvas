@@ -1,5 +1,6 @@
 from typing import Tuple, Dict, Any, List, Optional, Union
 import os
+import threading
 import numpy as np
 import cv2
 import mediapipe as mp
@@ -41,6 +42,9 @@ class AirCanvas:
         self._last_time: float = time.time()
         self.last_snap_time: float = 0.0
         self.snap_feedback_time: float = 0.0
+        self._is_materializing: bool = False
+        self.materialize_status: Optional[str] = None
+        self._mat_lock = threading.Lock()
 
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         assets_path = assets_dir or os.path.join(base_dir, "assets")
@@ -96,48 +100,77 @@ class AirCanvas:
 
         return self.object_mgr.add_object(name, pos_x, pos_y, 140, 140)
 
-    def materialize_current(self, hint: Optional[str] = None) -> Optional[VirtualObject]:
-        """Convert the current sketch into a real background-free object using Nano Banana."""
+    def materialize_current(self, hint: Optional[str] = None) -> None:
+        """Asynchronously converts current sketch or prompt into a real background-free object."""
+        if self._is_materializing:
+            return
+
+        self._is_materializing = True
+        self.materialize_status = "✨ Synthesizing AI Object..."
+
         w, h = 640, 480
         if self.canvas is not None:
             h, w = self.canvas.shape[:2]
 
-        pts = self.current_stroke
+        pts = list(self.current_stroke)
         if len(pts) < 4 and self.canvas is not None:
             gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)
             nonzero = cv2.findNonZero(gray)
             if nonzero is not None:
                 pts = [tuple(p[0]) for p in nonzero]
 
-        min_x, min_y = (w // 2 - 70, h // 2 - 70)
-        size = 140
-        if len(pts) >= 4:
-            arr = np.array(pts)
-            min_x, min_y = int(np.min(arr[:, 0])), int(np.min(arr[:, 1]))
-            max_x, max_y = int(np.max(arr[:, 0])), int(np.max(arr[:, 1]))
-            size = max(100, max(max_x - min_x, max_y - min_y))
+        canvas_copy = self.canvas.copy() if self.canvas is not None else np.zeros((h, w, 3), dtype=np.uint8)
+        self.current_stroke.clear()
 
-        # Determine object label
-        object_prompt = hint
-        if not object_prompt and self.canvas is not None and self.recognizer.is_configured():
-            object_prompt = self.recognizer.identify_sketch(self.canvas)
+        # Launch in background thread so the camera video NEVER freezes!
+        t = threading.Thread(
+            target=self._async_materialize_worker,
+            args=(canvas_copy, pts, hint, w, h),
+            daemon=True
+        )
+        t.start()
 
-        if not object_prompt:
-            object_prompt = "apple"
+    def _async_materialize_worker(self, canvas_copy: np.ndarray, pts: List[Tuple[int, int]], hint: Optional[str], w: int, h: int):
+        try:
+            min_x, min_y = (w // 2 - 70, h // 2 - 70)
+            size = 140
+            if len(pts) >= 4:
+                arr = np.array(pts)
+                min_x, min_y = int(np.min(arr[:, 0])), int(np.min(arr[:, 1]))
+                max_x, max_y = int(np.max(arr[:, 0])), int(np.max(arr[:, 1]))
+                size = max(110, max(max_x - min_x, max_y - min_y))
 
-        # Generate realistic transparent cutout using Nano Banana
-        bgra_img, status_info = self.nano_banana.generate_cutout(object_prompt)
-        if bgra_img is not None:
-            obj = VirtualObject(self.object_mgr._next_id, object_prompt, bgra_img, min_x, min_y, size, size)
-            self.object_mgr._next_id += 1
-            self.object_mgr.objects.append(obj)
-            self.reset()
-            return obj
+            # Identify sketch using Gemini Vision if hint not provided
+            object_prompt = hint
+            if not object_prompt and self.recognizer.is_configured():
+                object_prompt = self.recognizer.identify_sketch(canvas_copy)
 
-        # Fallback to manager add_object
-        obj = self.object_mgr.add_object(object_prompt, min_x, min_y, size, size)
-        self.reset()
-        return obj
+            if not object_prompt:
+                object_prompt = "cube"
+
+            self.materialize_status = f"✨ Creating {object_prompt}..."
+
+            # Generate realistic transparent cutout using Nano Banana on magenta chroma-key
+            bgra_img, status_info = self.nano_banana.generate_cutout(object_prompt)
+            if bgra_img is not None:
+                with self._mat_lock:
+                    obj = VirtualObject(self.object_mgr._next_id, object_prompt, bgra_img, min_x, min_y, size, size)
+                    self.object_mgr._next_id += 1
+                    self.object_mgr.objects.append(obj)
+                    # Clear canvas strokes
+                    if self.canvas is not None:
+                        self.canvas = np.zeros_like(self.canvas)
+            else:
+                with self._mat_lock:
+                    self.object_mgr.add_object(object_prompt, min_x, min_y, size, size)
+                    if self.canvas is not None:
+                        self.canvas = np.zeros_like(self.canvas)
+
+        except Exception as e:
+            print(f"[AirCanvas] Error in async materialize: {e}")
+        finally:
+            self._is_materializing = False
+            self.materialize_status = None
 
     def _draw_palette(self, frame: np.ndarray):
         w = frame.shape[1]
@@ -296,9 +329,12 @@ class AirCanvas:
         if self.show_palette:
             self._draw_palette(combined)
 
-        # On-screen visual feedback for Finger Snap gesture
-        if now - self.snap_feedback_time < 1.5:
-            # Draw glowing badge across top
+        # On-screen visual feedback for Finger Snap gesture or Materializing in background
+        if self.materialize_status:
+            cv2.rectangle(combined, (w // 2 - 220, 20), (w // 2 + 220, 64), (18, 21, 29), -1)
+            cv2.rectangle(combined, (w // 2 - 220, 20), (w // 2 + 220, 64), (255, 0, 255), 2)
+            cv2.putText(combined, self.materialize_status, (w // 2 - 200, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 120, 255), 2, cv2.LINE_AA)
+        elif now - self.snap_feedback_time < 1.5:
             cv2.rectangle(combined, (w // 2 - 210, 20), (w // 2 + 210, 64), (18, 21, 29), -1)
             cv2.rectangle(combined, (w // 2 - 210, 20), (w // 2 + 210, 64), (255, 0, 255), 2)
             cv2.putText(combined, "SNAP DETECTED! MATERIALIZING...", (w // 2 - 195, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 100, 255), 2, cv2.LINE_AA)
