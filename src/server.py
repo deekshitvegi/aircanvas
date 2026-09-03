@@ -21,12 +21,12 @@ class CanvasServerEngine:
         self.source = 0
         self.mirror = True
         self.stream: Optional[VideoStream] = None
-        self.canvas = AirCanvas()
+        # show_palette=False eliminates the ugly OpenCV top bar from the camera view
+        self.canvas = AirCanvas(show_palette=False)
         self.latest_frame: Optional[np.ndarray] = None
         self.latest_telemetry = {}
         self.is_running = True
 
-        # Preload key if available in environment
         env_key = os.getenv("GEMINI_API_KEY")
         if env_key:
             self.canvas.set_api_key(env_key)
@@ -100,8 +100,6 @@ HTML_TEMPLATE = """
             --text-primary: #f0f3f8;
             --text-secondary: #909bb0;
             --accent-primary: #3b82f6;
-            --accent-glow: rgba(59, 130, 246, 0.15);
-            --accent-pink: #ec4899;
             --radius-sm: 6px;
             --radius-md: 10px;
             --radius-lg: 14px;
@@ -125,7 +123,6 @@ HTML_TEMPLATE = """
             user-select: none;
         }
 
-        /* Top Navigation */
         header {
             height: 52px;
             background-color: var(--surface-1);
@@ -147,7 +144,6 @@ HTML_TEMPLATE = """
         .brand-title {
             font-size: 0.95rem;
             font-weight: 600;
-            letter-spacing: -0.2px;
             color: #ffffff;
         }
 
@@ -164,7 +160,7 @@ HTML_TEMPLATE = """
         .header-controls {
             display: flex;
             align-items: center;
-            gap: 14px;
+            gap: 12px;
         }
 
         .status-tag {
@@ -201,7 +197,18 @@ HTML_TEMPLATE = """
             border-color: var(--border-strong);
         }
 
-        /* Studio Main Workspace */
+        .key-badge-unconfigured {
+            background-color: #3b2020;
+            border-color: #7f2323;
+            color: #fca5a5;
+        }
+
+        .key-badge-connected {
+            background-color: #132e22;
+            border-color: #1d6d45;
+            color: #86efac;
+        }
+
         main {
             flex: 1;
             position: relative;
@@ -234,13 +241,13 @@ HTML_TEMPLATE = """
             object-fit: contain;
         }
 
-        /* Floating Studio Bottom Dock */
+        /* Bottom Studio Dock */
         .bottom-dock {
             position: absolute;
             bottom: 24px;
             left: 50%;
             transform: translateX(-50%);
-            background-color: rgba(18, 21, 29, 0.92);
+            background-color: rgba(18, 21, 29, 0.94);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             border: 1px solid var(--border-strong);
@@ -248,7 +255,7 @@ HTML_TEMPLATE = """
             padding: 6px 14px;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             z-index: 20;
         }
@@ -292,12 +299,12 @@ HTML_TEMPLATE = """
             display: inline-block;
         }
 
-        /* Object Generator Drawer */
+        /* Top-Right Generator Panel */
         .generator-panel {
             position: absolute;
             top: 24px;
             right: 24px;
-            width: 310px;
+            width: 320px;
             background-color: rgba(18, 21, 29, 0.94);
             backdrop-filter: blur(16px);
             border: 1px solid var(--border-strong);
@@ -338,7 +345,6 @@ HTML_TEMPLATE = """
             padding: 8px 10px;
             font-size: 0.82rem;
             outline: none;
-            transition: border-color 0.15s;
         }
 
         input:focus {
@@ -401,7 +407,17 @@ HTML_TEMPLATE = """
             background-color: var(--surface-3);
         }
 
-        /* Settings Dialog Modal */
+        .instruction-note {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            line-height: 1.45;
+            background-color: var(--surface-2);
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            border-left: 3px solid var(--accent-primary);
+        }
+
+        /* Settings Modal */
         .modal-overlay {
             position: fixed;
             inset: 0;
@@ -413,7 +429,7 @@ HTML_TEMPLATE = """
         }
 
         .modal-card {
-            width: 420px;
+            width: 440px;
             background-color: var(--surface-1);
             border: 1px solid var(--border-strong);
             border-radius: var(--radius-lg);
@@ -421,21 +437,6 @@ HTML_TEMPLATE = """
             display: flex;
             flex-direction: column;
             gap: 16px;
-        }
-
-        .modal-title {
-            font-size: 1rem;
-            font-weight: 600;
-        }
-
-        .instruction-note {
-            font-size: 0.78rem;
-            color: var(--text-secondary);
-            line-height: 1.5;
-            background-color: var(--surface-2);
-            padding: 10px 12px;
-            border-radius: var(--radius-sm);
-            border-left: 3px solid var(--accent-primary);
         }
     </style>
 </head>
@@ -457,18 +458,18 @@ HTML_TEMPLATE = """
                 Mirror: <span id="mirrorState">Selfie</span>
             </button>
 
-            <button class="ghost-button" onclick="openKeyModal()">
-                API Key: <span id="apiKeyLabel">Configure</span>
+            <button id="apiKeyBtn" class="ghost-button key-badge-unconfigured" onclick="openKeyModal()">
+                Gemini API: <span id="apiKeyLabel">Connect Key</span>
             </button>
         </div>
     </header>
 
     <main>
         <div class="canvas-frame">
-            <img src="/video_feed" alt="Studio Feed" />
+            <img src="/video_feed" alt="Studio Stream" />
         </div>
 
-        <!-- Generative Object Studio Panel -->
+        <!-- Studio Generative Object Panel -->
         <div class="generator-panel">
             <div class="panel-header">
                 <span class="panel-title">Nano Banana Generator</span>
@@ -476,30 +477,30 @@ HTML_TEMPLATE = """
             </div>
 
             <div style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.35;">
-                Draw an outline in the air with the Magic tool, or enter any object to synthesize with Nano Banana cutout:
+                Enter any object to synthesize a realistic transparent cutout via Nano Banana:
             </div>
 
             <div class="panel-input-wrap">
-                <input type="text" id="objectPrompt" placeholder="Object (e.g. electric guitar, sword, cup)" />
-                <button class="btn-primary" onclick="materializePrompt()">Create</button>
+                <input type="text" id="objectPrompt" placeholder="Object (e.g. airpods, cricket bat, guitar)" />
+                <button class="btn-primary" id="createBtn" onclick="materializePrompt()">Create</button>
             </div>
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Quick Cutouts</span>
-                <button class="btn-secondary" style="padding: 3px 8px; font-size: 0.7rem;" onclick="clearObjects()">Clear Objects</button>
+                <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Authentic Cutouts</span>
+                <button class="btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: #f87171;" onclick="clearObjects()">Clear Objects</button>
             </div>
 
             <div class="chip-grid">
-                <div class="chip" onclick="spawnCutout('banana')">Banana</div>
-                <div class="chip" onclick="spawnCutout('sunglasses')">Glasses</div>
-                <div class="chip" onclick="spawnCutout('crown')">Crown</div>
-                <div class="chip" onclick="spawnCutout('apple')">Apple</div>
-                <div class="chip" onclick="spawnCutout('pizza')">Pizza</div>
+                <div class="chip" onclick="spawnCutout('airpods')">AirPods</div>
+                <div class="chip" onclick="spawnCutout('cricket bat')">Cricket Bat</div>
                 <div class="chip" onclick="spawnCutout('guitar')">Guitar</div>
+                <div class="chip" onclick="spawnCutout('sunglasses')">Sunglasses</div>
+                <div class="chip" onclick="spawnCutout('banana')">Banana</div>
+                <div class="chip" onclick="spawnCutout('crown')">Crown</div>
             </div>
 
-            <div class="instruction-note" style="margin-top: 4px;">
-                <strong>Hand Control:</strong> Pinch your index finger and thumb together to grab and move any object in mid-air.
+            <div class="instruction-note">
+                <strong>Mid-Air Grab:</strong> Pinch your index finger and thumb together near any object to pick it up and move it across your screen.
             </div>
         </div>
 
@@ -532,6 +533,9 @@ HTML_TEMPLATE = """
             <button class="dock-tool" onclick="clearStrokes()">
                 Clear Lines
             </button>
+            <button class="dock-tool" style="color: #f87171;" onclick="clearObjects()">
+                Remove All Objects
+            </button>
             <button class="dock-tool" onclick="saveSnapshot()">
                 Snapshot
             </button>
@@ -541,9 +545,9 @@ HTML_TEMPLATE = """
     <!-- API Key Settings Modal -->
     <div id="keyModal" class="modal-overlay">
         <div class="modal-card">
-            <div class="modal-title">Gemini API Key Configuration</div>
+            <div style="font-size: 1rem; font-weight: 600;">Connect Gemini API Key</div>
             <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45;">
-                Enter your Google AI Studio Gemini API key. This enables Nano Banana generative image synthesis and sketch understanding, and is automatically saved to your local environment.
+                Please paste your Google AI Studio Gemini API key below. This connects Google Imagen 3 (Nano Banana) to generate photorealistic AI cutouts from any prompt or drawing, and automatically persists to your local environment.
             </div>
 
             <input type="password" id="modalKeyInput" placeholder="AIzaSy..." />
@@ -559,7 +563,7 @@ HTML_TEMPLATE = """
         let isMirror = true;
 
         async function selectTool(tool) {
-            document.querySelectorAll(".dock-tool").forEach(b => {
+            document.querySelectorAll(".dock-tool[data-tool]").forEach(b => {
                 b.classList.toggle("active", b.getAttribute("data-tool") === tool);
             });
             await fetch("/api/tool", {
@@ -581,20 +585,22 @@ HTML_TEMPLATE = """
 
         async function materializePrompt() {
             const prompt = document.getElementById("objectPrompt").value.trim();
-            const btn = event.target;
+            if (!prompt) return;
+            const btn = document.getElementById("createBtn");
             const originalText = btn.innerText;
-            btn.innerText = "Synthesizing...";
+            btn.innerText = "Generating...";
             btn.disabled = true;
 
             try {
-                await fetch("/api/materialize", {
+                const res = await fetch("/api/materialize", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ prompt: prompt || "apple" })
+                    body: JSON.stringify({ prompt: prompt })
                 });
+                const data = await res.json();
                 document.getElementById("objectPrompt").value = "";
             } catch (e) {
-                console.error("Error materializing:", e);
+                console.error("Error creating object:", e);
             } finally {
                 btn.innerText = originalText;
                 btn.disabled = false;
@@ -643,6 +649,8 @@ HTML_TEMPLATE = """
             });
             const data = await res.json();
             if (data.status === "ok") {
+                const btn = document.getElementById("apiKeyBtn");
+                btn.className = "ghost-button key-badge-connected";
                 document.getElementById("apiKeyLabel").innerText = "Connected";
                 closeKeyModal();
             }
@@ -655,11 +663,15 @@ HTML_TEMPLATE = """
                 document.getElementById("fpsIndicator").innerText = (data.fps || 30.0).toFixed(1) + " FPS";
                 document.getElementById("objectCounter").innerText = `${data.objects_count || 0} Objects`;
 
+                const btn = document.getElementById("apiKeyBtn");
                 if (data.has_api_key) {
+                    btn.className = "ghost-button key-badge-connected";
                     document.getElementById("apiKeyLabel").innerText = "Connected";
+                } else {
+                    btn.className = "ghost-button key-badge-unconfigured";
+                    document.getElementById("apiKeyLabel").innerText = "Connect Key";
                 }
 
-                // Sync active tool
                 document.querySelectorAll(".dock-tool[data-tool]").forEach(b => {
                     b.classList.toggle("active", b.getAttribute("data-tool") === data.active_tool);
                 });

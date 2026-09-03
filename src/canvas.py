@@ -21,7 +21,7 @@ class AirCanvas:
         {"name": "ERASER", "color": (0, 0, 0)},
     ]
 
-    def __init__(self, max_hands: int = 1, auto_snap: bool = True, assets_dir: Optional[str] = None):
+    def __init__(self, max_hands: int = 1, auto_snap: bool = True, assets_dir: Optional[str] = None, show_palette: bool = False):
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
             max_num_hands=max_hands,
@@ -29,6 +29,7 @@ class AirCanvas:
             min_tracking_confidence=0.6
         )
         self.auto_snap = auto_snap
+        self.show_palette = show_palette
         self.canvas: Optional[np.ndarray] = None
         self.prev_pt: Optional[Tuple[int, int]] = None
         self.active_color_idx: int = 0
@@ -277,7 +278,8 @@ class AirCanvas:
         canvas_fg = cv2.bitwise_and(self.canvas, self.canvas, mask=mask)
         combined = cv2.add(frame_bg, canvas_fg)
 
-        self._draw_palette(combined)
+        if self.show_palette:
+            self._draw_palette(combined)
 
         # Streamlined lower telemetry strip
         cv2.putText(combined, f"{active_tool}  ·  {mode}  ·  {len(self.object_mgr.objects)} OBJECTS  ·  {self.fps:.1f} FPS", (20, h - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 210, 225), 1, cv2.LINE_AA)
