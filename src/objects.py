@@ -100,11 +100,7 @@ class InteractiveObjectManager:
         self._load_cached_assets()
 
     def _load_cached_assets(self):
-        """Preload available PNG assets from disk or generate if missing."""
-        pngs = [f for f in os.listdir(self.assets_dir) if f.endswith(".png")] if os.path.exists(self.assets_dir) else []
-        if not pngs:
-            generate_all_presets(self.assets_dir)
-
+        """Preload available PNG assets from disk."""
         if os.path.exists(self.assets_dir):
             for f in os.listdir(self.assets_dir):
                 if f.endswith(".png"):
@@ -114,7 +110,7 @@ class InteractiveObjectManager:
                     if img is not None and img.shape[2] == 4:
                         self._cached_assets[name] = img
 
-    def add_object(self, name: str, x: int, y: int, width: int = 140, height: int = 140) -> Optional[VirtualObject]:
+    def add_object(self, name: str, x: int, y: int, width: int = 150, height: int = 150) -> Optional[VirtualObject]:
         """Spawn a new interactive virtual object."""
         name_key = name.strip().lower()
         matched_key = None
@@ -124,7 +120,8 @@ class InteractiveObjectManager:
                 break
 
         if not matched_key:
-            matched_key = "banana" if "banana" in self._cached_assets else (list(self._cached_assets.keys())[0] if self._cached_assets else None)
+            # Fallback to butterfly or any available high-res asset, never forced banana
+            matched_key = "butterfly" if "butterfly" in self._cached_assets else (list(self._cached_assets.keys())[0] if self._cached_assets else None)
 
         if not matched_key:
             return None
