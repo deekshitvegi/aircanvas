@@ -1,5 +1,6 @@
 from typing import Tuple, Dict, Any, List, Optional, Union
 import os
+import re
 import threading
 import numpy as np
 import cv2
@@ -105,28 +106,46 @@ class AirCanvas:
         if self._is_materializing:
             return
 
+        w, h = 640, 480
+        if self.canvas is not None:
+            h, w = self.canvas.shape[:2]
+
+        min_x, min_y = (w // 2 - 70, h // 2 - 70)
+        size = 140
+
+        # When materializing by sketch (no text hint), validate that there is an actual sketch
+        if not hint and self.canvas is not None:
+            gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)
+            nonzero_count = np.count_nonzero(gray)
+            if nonzero_count < 60:
+                self.materialize_status = "Canvas empty: sketch an object first!"
+                return
+
+            bx, by, bw, bh = cv2.boundingRect(gray)
+            min_dim = min(bw, bh)
+            max_dim = max(bw, bh)
+            # Check for 1D single lines or tiny scribbles (e.g. height < 18 while width > 40)
+            if (min_dim < 18 and max_dim > 40) or (min_dim < 12):
+                self.materialize_status = "Single stroke detected - finish drawing your object!"
+                return
+
+            min_x, min_y = bx, by
+            size = max(110, max_dim)
+        elif len(self.current_stroke) >= 4:
+            arr = np.array(self.current_stroke)
+            min_x, min_y = int(np.min(arr[:, 0])), int(np.min(arr[:, 1]))
+            max_x, max_y = int(np.max(arr[:, 0])), int(np.max(arr[:, 1]))
+            size = max(110, max(max_x - min_x, max_y - min_y))
+        elif self.canvas is not None:
+            gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)
+            if np.count_nonzero(gray) > 10:
+                bx, by, bw, bh = cv2.boundingRect(gray)
+                min_x, min_y = bx, by
+                size = max(110, max(bw, bh))
+
         try:
             self._is_materializing = True
-            self.materialize_status = "✨ Synthesizing AI Object..."
-
-            w, h = 640, 480
-            if self.canvas is not None:
-                h, w = self.canvas.shape[:2]
-
-            min_x, min_y = (w // 2 - 70, h // 2 - 70)
-            size = 140
-
-            if len(self.current_stroke) >= 4:
-                arr = np.array(self.current_stroke)
-                min_x, min_y = int(np.min(arr[:, 0])), int(np.min(arr[:, 1]))
-                max_x, max_y = int(np.max(arr[:, 0])), int(np.max(arr[:, 1]))
-                size = max(110, max(max_x - min_x, max_y - min_y))
-            elif self.canvas is not None:
-                gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)
-                if np.count_nonzero(gray) > 10:
-                    bx, by, bw, bh = cv2.boundingRect(gray)
-                    min_x, min_y = bx, by
-                    size = max(110, max(bw, bh))
+            self.materialize_status = "Analyzing sketch with AI..."
 
             canvas_copy = self.canvas.copy() if self.canvas is not None else np.zeros((h, w, 3), dtype=np.uint8)
             self.current_stroke.clear()
@@ -147,15 +166,25 @@ class AirCanvas:
         try:
             object_prompt = hint
             if not object_prompt and self.recognizer.is_configured():
-                self.materialize_status = "✨ Analyzing Sketch with Vision AI..."
+                self.materialize_status = "Analyzing sketch with Vision AI..."
                 object_prompt = self.recognizer.identify_sketch(canvas_copy)
 
-            if not object_prompt:
-                object_prompt = "butterfly"
+            # Strict rejection of incomplete sketches, math symbols, or abstract line strokes
+            INVALID_SUBJECTS = {
+                "incomplete", "minus sign", "minus", "dash", "line", "dot",
+                "scribble", "hyphen", "straight line", "horizontal line",
+                "vertical line", "stroke", "symbol", "math symbol", "punctuation",
+                "blank", "nothing", "unknown", "none"
+            }
+
+            if not object_prompt or object_prompt.lower().strip() in INVALID_SUBJECTS:
+                self.materialize_status = "Incomplete drawing - finish sketching your object!"
+                time.sleep(2.5)
+                return
 
             display_name = object_prompt.title()
             self.last_recognized_name = display_name
-            self.materialize_status = f"✨ Recognized: '{display_name}'! Finding real PNG..."
+            self.materialize_status = f"Recognized: '{display_name}'! Finding real PNG..."
 
             # Retrieve authentic transparent PNG cutout online
             bgra_img, status_info = self.nano_banana.generate_cutout(object_prompt)
@@ -167,7 +196,7 @@ class AirCanvas:
                     if self.canvas is not None:
                         self.canvas = np.zeros_like(self.canvas)
 
-                self.materialize_status = f"✨ Materialized: {display_name}!"
+                self.materialize_status = f"Materialized: {display_name}!"
                 time.sleep(2.5)
             else:
                 self.materialize_status = f"Could not find PNG for {display_name}"
@@ -287,9 +316,7 @@ class AirCanvas:
                 elif index_up and middle_up and not interaction["grabbed"]:
                     mode = "HOVER"
                     self.prev_pt = None
-                    if is_magic and len(self.current_stroke) > 12:
-                        self.materialize_current()
-                    elif len(self.current_stroke) > 10 and self.auto_snap:
+                    if not is_magic and not is_eraser and len(self.current_stroke) > 10 and self.auto_snap:
                         detected = detect_geometric_shape(self.current_stroke)
                         if detected:
                             self.last_detected_shape = detected["type"]
@@ -338,13 +365,17 @@ class AirCanvas:
 
         # On-screen visual feedback for Finger Snap gesture or Materializing in background
         if self.materialize_status:
-            cv2.rectangle(combined, (w // 2 - 220, 20), (w // 2 + 220, 64), (18, 21, 29), -1)
-            cv2.rectangle(combined, (w // 2 - 220, 20), (w // 2 + 220, 64), (255, 0, 255), 2)
-            cv2.putText(combined, self.materialize_status, (w // 2 - 200, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 120, 255), 2, cv2.LINE_AA)
+            clean_status = re.sub(r'[^\x00-\x7F]+', '', self.materialize_status).strip()
+            (tw, th), _ = cv2.getTextSize(clean_status, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            bx1 = max(10, w // 2 - tw // 2 - 20)
+            bx2 = min(w - 10, w // 2 + tw // 2 + 20)
+            cv2.rectangle(combined, (bx1, 18), (bx2, 62), (18, 21, 29), -1)
+            cv2.rectangle(combined, (bx1, 18), (bx2, 62), (255, 0, 255), 2)
+            cv2.putText(combined, clean_status, (bx1 + 18, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 140, 255), 2, cv2.LINE_AA)
         elif now - self.snap_feedback_time < 1.5:
-            cv2.rectangle(combined, (w // 2 - 210, 20), (w // 2 + 210, 64), (18, 21, 29), -1)
-            cv2.rectangle(combined, (w // 2 - 210, 20), (w // 2 + 210, 64), (255, 0, 255), 2)
-            cv2.putText(combined, "SNAP DETECTED! MATERIALIZING...", (w // 2 - 195, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 100, 255), 2, cv2.LINE_AA)
+            cv2.rectangle(combined, (w // 2 - 210, 18), (w // 2 + 210, 62), (18, 21, 29), -1)
+            cv2.rectangle(combined, (w // 2 - 210, 18), (w // 2 + 210, 62), (255, 0, 255), 2)
+            cv2.putText(combined, "SNAP DETECTED! MATERIALIZING...", (w // 2 - 195, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 100, 255), 2, cv2.LINE_AA)
 
         # Streamlined lower telemetry strip
         cv2.putText(combined, f"{active_tool}  ·  {mode}  ·  {len(self.object_mgr.objects)} OBJECTS  ·  {self.fps:.1f} FPS", (20, h - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 210, 225), 1, cv2.LINE_AA)

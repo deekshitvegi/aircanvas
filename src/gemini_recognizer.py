@@ -85,12 +85,14 @@ class GeminiSketchRecognizer:
             pil_img.save(buf, format="JPEG", quality=90)
             b64_img = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-            # Open-ended, unbiased recognition prompt - ZERO hardcoded answer examples
+            # Open-ended visual perception prompt with incomplete sketch detection
             prompt = (
                 "You are an AI sketch perception engine. Look at this hand-drawn outline sketch.\n"
                 "Identify what specific physical object, animal, character, vehicle, tool, gadget, plant, clothing, food, or item is drawn.\n"
-                "Be direct and accurate to what the lines and shapes actually depict.\n"
-                "Reply with ONLY 1 to 3 words naming the object in lowercase. Do not include any filler text or punctuation."
+                "RULES:\n"
+                "- If the drawing is just a single line, stroke, minus sign, dash, dot, or unfinished scribble, reply with 'incomplete'.\n"
+                "- Otherwise, be direct and accurate to what the lines and shapes actually depict.\n"
+                "- Reply with ONLY 1 to 3 words naming the object in lowercase. Do not include any filler text or punctuation."
             )
 
             payload = {

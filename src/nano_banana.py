@@ -116,8 +116,14 @@ class NanoBananaEngine:
         using deep learning saliency segmentation.
         """
         clean_prompt = prompt_text.strip().lower()
-        if not clean_prompt:
-            clean_prompt = "butterfly"
+        INVALID_SUBJECTS = {
+            "incomplete", "minus sign", "minus", "dash", "line", "dot",
+            "scribble", "hyphen", "straight line", "horizontal line",
+            "vertical line", "stroke", "symbol", "math symbol", "punctuation",
+            "blank", "nothing", "unknown", "none"
+        }
+        if clean_prompt in INVALID_SUBJECTS or not clean_prompt:
+            return None, "Incomplete drawing sketch"
 
         # Tier 1: Dedicated Free Transparent PNG Library
         img = self._fetch_from_pngall(clean_prompt)
