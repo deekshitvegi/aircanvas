@@ -491,26 +491,25 @@ HTML_TEMPLATE = """
 
             <div style="border-top: 1px solid var(--border-subtle); padding-top: 8px;">
                 <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 6px;">
-                    Or type any object to generate:
+                    Or type any object to generate dynamically:
                 </div>
                 <div class="panel-input-wrap">
-                    <input type="text" id="objectPrompt" placeholder="e.g. butterfly, 3d cube, sword" />
-                    <button class="btn-primary" id="createBtn" onclick="materializePrompt()">Create</button>
+                    <input type="text" id="objectPrompt" placeholder="e.g. dragon, spaceship, guitar, cyber helmet" />
+                    <button class="btn-primary" id="createBtn" onclick="materializePrompt()">Synthesize</button>
                 </div>
             </div>
 
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Quick Cutouts</span>
-                <button class="btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: #f87171;" onclick="clearObjects()">Clear Objects</button>
-            </div>
-
-            <div class="chip-grid">
-                <div class="chip" onclick="spawnCutout('butterfly')">Butterfly</div>
-                <div class="chip" onclick="spawnCutout('cube')">3D Cube</div>
-                <div class="chip" onclick="spawnCutout('iphone')">iPhone</div>
-                <div class="chip" onclick="spawnCutout('sword')">Sword</div>
-                <div class="chip" onclick="spawnCutout('airpods')">AirPods</div>
-                <div class="chip" onclick="spawnCutout('cricket bat')">Cricket Bat</div>
+            <div style="background: rgba(36, 41, 56, 0.6); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Pipeline Mode</span>
+                    <span style="font-size: 0.72rem; color: #10b981; font-weight: 600;">100% Dynamic AI</span>
+                </div>
+                <div style="font-size: 0.74rem; color: var(--text-secondary);">
+                    No hardcoded answers. Every sketch is perceived by Gemini vision and synthesized live via AI diffusion with rembg cutout.
+                </div>
+                <button class="btn-secondary" style="margin-top: 4px; padding: 5px 8px; font-size: 0.72rem; color: #f87171; width: 100%;" onclick="clearObjects()">
+                    Clear Active Objects
+                </button>
             </div>
 
             <div class="instruction-note">

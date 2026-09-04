@@ -1,7 +1,7 @@
 """
 Gemini Sketch Recognizer for AirCanvas Magic Pencil.
 Uses gemini-3.1-flash-lite REST API with high-contrast dilated black ink preprocessing
-and unbiased shape analysis to accurately identify mid-air hand sketches without false apple/banana biases.
+and 100% open-ended, unbiased shape perception. Zero hardcoded example lists or biased fallbacks.
 """
 
 import os
@@ -37,15 +37,18 @@ class GeminiSketchRecognizer:
     def is_configured(self) -> bool:
         return bool(self.api_key and len(self.api_key) > 10)
 
-    def identify_sketch(self, canvas_drawing: np.ndarray) -> str:
-        """Analyze drawing via Gemini vision REST API and return the concise identified object name."""
+    def identify_sketch(self, canvas_drawing: np.ndarray) -> Optional[str]:
+        """
+        Analyze drawing via Gemini vision REST API with open-ended visual perception.
+        Returns whatever subject the user actually sketched without hardcoded examples.
+        """
         if not self.is_configured():
-            return "butterfly"
+            return None
 
         # Check if drawing has sufficient stroke data
         gray = cv2.cvtColor(canvas_drawing, cv2.COLOR_BGR2GRAY)
-        if np.count_nonzero(gray) < 40:
-            return "butterfly"
+        if np.count_nonzero(gray) < 30:
+            return None
 
         try:
             # Crop tightly around drawing
@@ -60,10 +63,10 @@ class GeminiSketchRecognizer:
             else:
                 cropped_gray = gray
 
-            # Convert to pristine high-contrast black ink on pure white paper
+            # Convert to high-contrast black ink on pure white paper
             _, thresh = cv2.threshold(cropped_gray, 20, 255, cv2.THRESH_BINARY)
 
-            # Dilate slightly so line strokes are bold, connected, and unmistakably clear to the AI
+            # Dilate slightly so line strokes are bold, connected, and unmistakably clear to the vision model
             kernel = np.ones((4, 4), np.uint8)
             dilated = cv2.dilate(thresh, kernel, iterations=1)
 
@@ -71,7 +74,7 @@ class GeminiSketchRecognizer:
             sketch_sheet = np.full((dilated.shape[0], dilated.shape[1]), 255, dtype=np.uint8)
             sketch_sheet[dilated > 0] = 0
 
-            # Pad with a clean margin
+            # Clean border margin
             border = 30
             sheet_with_margin = cv2.copyMakeBorder(
                 sketch_sheet, border, border, border, border, cv2.BORDER_CONSTANT, value=255
@@ -82,14 +85,12 @@ class GeminiSketchRecognizer:
             pil_img.save(buf, format="JPEG", quality=90)
             b64_img = base64.b64encode(buf.getvalue()).decode("utf-8")
 
+            # Open-ended, unbiased recognition prompt - ZERO hardcoded answer examples
             prompt = (
-                "You are an expert sketch recognition AI. Analyze this hand-drawn line sketch carefully.\n"
-                "Look at its contours, symmetry, geometry, and key distinguishing features.\n"
-                "What common real-world physical object, animal, vehicle, tool, or item is this intended to depict?\n\n"
-                "CRITICAL INSTRUCTIONS:\n"
-                "- Do NOT guess 'apple' or 'banana' unless the sketch is unmistakably an apple or banana.\n"
-                "- Typical objects people draw: butterfly, sword, 3d cube, airplane, car, cat, dog, bird, flower, house, cup, tree, guitar, fish, heart, star, glasses, watch, phone, laptop, boat.\n"
-                "- Reply with ONLY 1 or 2 lowercase words naming the exact object."
+                "You are an AI sketch perception engine. Look at this hand-drawn outline sketch.\n"
+                "Identify what specific physical object, animal, character, vehicle, tool, gadget, plant, clothing, food, or item is drawn.\n"
+                "Be direct and accurate to what the lines and shapes actually depict.\n"
+                "Reply with ONLY 1 to 3 words naming the object in lowercase. Do not include any filler text or punctuation."
             )
 
             payload = {
@@ -121,7 +122,7 @@ class GeminiSketchRecognizer:
                         res_data = json.loads(resp.read().decode("utf-8"))
                         text = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
                         clean = text.lower().replace(".", "").replace('"', '').replace("'", "").replace("a ", "").replace("an ", "").strip()
-                        if clean:
+                        if clean and len(clean) < 40:
                             return clean
                 except Exception:
                     continue
@@ -129,4 +130,4 @@ class GeminiSketchRecognizer:
         except Exception as e:
             print(f"[GeminiSketch] Error identifying sketch: {e}", file=sys.stderr)
 
-        return "butterfly"
+        return None
