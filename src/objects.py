@@ -14,26 +14,37 @@ from .asset_generator import generate_all_presets
 
 
 class VirtualObject:
-    def __init__(self, obj_id: int, name: str, rgba_img: np.ndarray, x: int, y: int, width: int = 140, height: int = 140):
+    def __init__(self, obj_id: int, name: str, rgba_img: np.ndarray, x: int, y: int, width: int = 150, height: int = 150):
         self.id = obj_id
         self.name = name
         self.x = int(x)
         self.y = int(y)
-        self.width = max(50, int(width))
-        self.height = max(50, int(height))
         self.is_grabbed = False
         self.grab_offset_x = 0
         self.grab_offset_y = 0
 
-        # Resize RGBA to target width/height
-        self.rgba = cv2.resize(rgba_img, (self.width, self.height), interpolation=cv2.INTER_AREA)
+        # Preserve authentic natural aspect ratio (never squish or distort objects)
+        orig_h, orig_w = rgba_img.shape[:2]
+        aspect = orig_w / max(1, orig_h)
+        base_size = max(width, height, 160)
+
+        if aspect >= 1.0:
+            self.width = int(base_size)
+            self.height = max(45, int(base_size / aspect))
+        else:
+            self.height = int(base_size)
+            self.width = max(45, int(base_size * aspect))
+
+        # High-definition Lanczos4 resizing for razor-sharp textures
+        interp = cv2.INTER_AREA if (self.width < orig_w) else cv2.INTER_LANCZOS4
+        self.rgba = cv2.resize(rgba_img, (self.width, self.height), interpolation=interp)
 
     def contains(self, px: int, py: int) -> bool:
         """Check if point (px, py) is inside object bounding box."""
         return (self.x <= px <= self.x + self.width) and (self.y <= py <= self.y + self.height)
 
     def render(self, frame: np.ndarray) -> np.ndarray:
-        """Alpha-blend the transparent object over the frame."""
+        """Alpha-blend the transparent object over the frame with smooth edges."""
         fh, fw = frame.shape[:2]
 
         # Clamp drawing coordinates to frame
@@ -52,17 +63,24 @@ class VirtualObject:
         oy2 = oy1 + (y2 - y1)
 
         crop_rgba = self.rgba[oy1:oy2, ox1:ox2]
-        crop_rgb = crop_rgba[:, :, :3]
+        crop_bgr = crop_rgba[:, :, :3]
         alpha = (crop_rgba[:, :, 3] / 255.0)[:, :, np.newaxis]
 
         bg_slice = frame[y1:y2, x1:x2]
-        blended = (crop_rgb * alpha + bg_slice * (1.0 - alpha)).astype(np.uint8)
+        blended = (crop_bgr * alpha + bg_slice * (1.0 - alpha)).astype(np.uint8)
         frame[y1:y2, x1:x2] = blended
 
-        # Visual selection border if grabbed
+        # Sleek corner brackets and title tag when grabbed (Apple Vision Pro style)
         if self.is_grabbed:
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 230, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"HOLDING {self.name.upper()}", (x1, max(20, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 230, 255), 1, cv2.LINE_AA)
+            # Elegant corner brackets
+            c_len = min(14, min(self.width, self.height) // 4)
+            for cx, cy, dx, dy in [(x1, y1, 1, 1), (x2, y1, -1, 1), (x1, y2, 1, -1), (x2, y2, -1, -1)]:
+                cv2.line(frame, (cx, cy), (cx + dx * c_len, cy), (0, 230, 255), 2, cv2.LINE_AA)
+                cv2.line(frame, (cx, cy), (cx, cy + dy * c_len), (0, 230, 255), 2, cv2.LINE_AA)
+
+            # Minimalist pill badge
+            badge_text = self.name.upper()
+            cv2.putText(frame, badge_text, (x1 + 4, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 230, 255), 1, cv2.LINE_AA)
 
         return frame
 
