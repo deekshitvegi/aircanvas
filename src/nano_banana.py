@@ -31,7 +31,7 @@ class NanoBananaEngine:
         return bool(self.api_key and len(self.api_key) > 10)
 
     def _fetch_from_pngall(self, query: str) -> Optional[Image.Image]:
-        """Search and download free high-definition transparent PNGs from PNGAll library."""
+        """Search and download free high-definition transparent PNGs from PNGAll library with solid opaque bodies."""
         try:
             url = f"https://www.pngall.com/?s={urllib.parse.quote(query)}"
             req = urllib.request.Request(
@@ -41,15 +41,32 @@ class NanoBananaEngine:
             with urllib.request.urlopen(req, timeout=5) as r:
                 html = r.read().decode("utf-8", errors="ignore")
                 matches = re.findall(r'https?://www\.pngall\.com/wp-content/uploads/[^\s\"\'><]+\.png', html)
-                valid = [m for m in matches if "logo" not in m.lower() and "banner" not in m.lower() and "icon" not in m.lower()]
-                if valid:
-                    # Strip thumbnail suffix to get the full-resolution PNG
-                    full_url = re.sub(r'-\d+x\d+\.png$', '.png', valid[0])
-                    r2 = urllib.request.Request(full_url, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(r2, timeout=6) as resp:
-                        img = Image.open(io.BytesIO(resp.read())).convert("RGBA")
-                        if img.size[0] >= 100 and img.size[1] >= 100:
-                            return img
+                
+                # Exclude wireframes, outlines, coloring books, sketches, and logos
+                bad_terms = ["logo", "banner", "icon", "black-and-white", "outline", "coloring", "silhouette", "sketch", "line-art"]
+                valid = [m for m in matches if not any(bt in m.lower() for bt in bad_terms)]
+                if not valid:
+                    valid = [m for m in matches if "logo" not in m.lower() and "banner" not in m.lower()]
+
+                for m in valid[:6]:
+                    full_url = re.sub(r'-\d+x\d+\.png$', '.png', m)
+                    try:
+                        r2 = urllib.request.Request(full_url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(r2, timeout=6) as resp:
+                            img = Image.open(io.BytesIO(resp.read())).convert("RGBA")
+                            if img.size[0] >= 100 and img.size[1] >= 100:
+                                arr = np.array(img)
+                                alpha = arr[:, :, 3]
+                                pts = cv2.findNonZero(alpha)
+                                if pts is not None:
+                                    x, y, w, h = cv2.boundingRect(pts)
+                                    box_alpha = alpha[y:y+h, x:x+w]
+                                    fill_ratio = np.count_nonzero(box_alpha > 128) / float(w * h)
+                                    # Ensure the object's body/wings are solid and colored, not an empty see-through wireframe
+                                    if fill_ratio >= 0.15:
+                                        return img
+                    except Exception:
+                        continue
         except Exception:
             pass
         return None
