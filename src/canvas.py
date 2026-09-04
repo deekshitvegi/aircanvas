@@ -105,59 +105,63 @@ class AirCanvas:
         if self._is_materializing:
             return
 
-        self._is_materializing = True
-        self.materialize_status = "✨ Synthesizing AI Object..."
-
-        w, h = 640, 480
-        if self.canvas is not None:
-            h, w = self.canvas.shape[:2]
-
-        pts = list(self.current_stroke)
-        if len(pts) < 4 and self.canvas is not None:
-            gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)
-            nonzero = cv2.findNonZero(gray)
-            if nonzero is not None:
-                pts = [tuple(p[0]) for p in nonzero]
-
-        canvas_copy = self.canvas.copy() if self.canvas is not None else np.zeros((h, w, 3), dtype=np.uint8)
-        self.current_stroke.clear()
-
-        # Launch in background thread so the camera video NEVER freezes!
-        t = threading.Thread(
-            target=self._async_materialize_worker,
-            args=(canvas_copy, pts, hint, w, h),
-            daemon=True
-        )
-        t.start()
-
-    def _async_materialize_worker(self, canvas_copy: np.ndarray, pts: List[Tuple[int, int]], hint: Optional[str], w: int, h: int):
         try:
+            self._is_materializing = True
+            self.materialize_status = "✨ Synthesizing AI Object..."
+
+            w, h = 640, 480
+            if self.canvas is not None:
+                h, w = self.canvas.shape[:2]
+
             min_x, min_y = (w // 2 - 70, h // 2 - 70)
             size = 140
-            if len(pts) >= 4:
-                arr = np.array(pts)
+
+            if len(self.current_stroke) >= 4:
+                arr = np.array(self.current_stroke)
                 min_x, min_y = int(np.min(arr[:, 0])), int(np.min(arr[:, 1]))
                 max_x, max_y = int(np.max(arr[:, 0])), int(np.max(arr[:, 1]))
                 size = max(110, max(max_x - min_x, max_y - min_y))
+            elif self.canvas is not None:
+                gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)
+                if np.count_nonzero(gray) > 10:
+                    bx, by, bw, bh = cv2.boundingRect(gray)
+                    min_x, min_y = bx, by
+                    size = max(110, max(bw, bh))
 
+            canvas_copy = self.canvas.copy() if self.canvas is not None else np.zeros((h, w, 3), dtype=np.uint8)
+            self.current_stroke.clear()
+
+            # Launch in background thread so the camera video NEVER freezes!
+            t = threading.Thread(
+                target=self._async_materialize_worker,
+                args=(canvas_copy, min_x, min_y, size, hint, w, h),
+                daemon=True
+            )
+            t.start()
+        except Exception as e:
+            print(f"[AirCanvas] Error initiating materialize: {e}", file=sys.stderr)
+            self._is_materializing = False
+            self.materialize_status = None
+
+    def _async_materialize_worker(self, canvas_copy: np.ndarray, min_x: int, min_y: int, size: int, hint: Optional[str], w: int, h: int):
+        try:
             # Identify sketch using Gemini Vision if hint not provided
             object_prompt = hint
             if not object_prompt and self.recognizer.is_configured():
                 object_prompt = self.recognizer.identify_sketch(canvas_copy)
 
             if not object_prompt:
-                object_prompt = "cube"
+                object_prompt = "butterfly"
 
             self.materialize_status = f"✨ Creating {object_prompt}..."
 
-            # Generate realistic transparent cutout using Nano Banana on magenta chroma-key
+            # Generate realistic transparent cutout using Flux + rembg
             bgra_img, status_info = self.nano_banana.generate_cutout(object_prompt)
             if bgra_img is not None:
                 with self._mat_lock:
                     obj = VirtualObject(self.object_mgr._next_id, object_prompt, bgra_img, min_x, min_y, size, size)
                     self.object_mgr._next_id += 1
                     self.object_mgr.objects.append(obj)
-                    # Clear canvas strokes
                     if self.canvas is not None:
                         self.canvas = np.zeros_like(self.canvas)
             else:
@@ -167,7 +171,7 @@ class AirCanvas:
                         self.canvas = np.zeros_like(self.canvas)
 
         except Exception as e:
-            print(f"[AirCanvas] Error in async materialize: {e}")
+            print(f"[AirCanvas] Error in async materialize: {e}", file=sys.stderr)
         finally:
             self._is_materializing = False
             self.materialize_status = None

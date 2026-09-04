@@ -11,6 +11,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+if sys.platform.startswith("win"):
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    except Exception:
+        pass
+
 from starlette.applications import Starlette
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
@@ -61,28 +67,32 @@ class CanvasServerEngine:
     def _loop(self):
         """High-speed webcam capture and vision processing loop."""
         while self.is_running:
-            if not self.stream or not self.stream.is_opened():
-                time.sleep(0.05)
-                continue
+            try:
+                if not self.stream or not self.stream.is_opened():
+                    time.sleep(0.05)
+                    continue
 
-            ret, frame = self.stream.read()
-            if not ret or frame is None:
+                ret, frame = self.stream.read()
+                if not ret or frame is None:
+                    time.sleep(0.02)
+                    continue
+
+                if self.mirror:
+                    frame = cv2.flip(frame, 1)
+
+                out, tel = self.canvas.process_frame(frame)
+                ret_enc, jpeg = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 78])
+
+                with self.lock:
+                    self.latest_frame = out
+                    self.latest_telemetry = tel
+                    if ret_enc:
+                        self.latest_jpeg = jpeg.tobytes()
+
+                time.sleep(0.005)
+            except Exception as e:
+                print(f"[AirCanvas Engine Error] {e}", file=sys.stderr)
                 time.sleep(0.02)
-                continue
-
-            if self.mirror:
-                frame = cv2.flip(frame, 1)
-
-            out, tel = self.canvas.process_frame(frame)
-            ret_enc, jpeg = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 78])
-
-            with self.lock:
-                self.latest_frame = out
-                self.latest_telemetry = tel
-                if ret_enc:
-                    self.latest_jpeg = jpeg.tobytes()
-
-            time.sleep(0.005)
 
     def get_jpeg(self) -> Optional[bytes]:
         with self.lock:
@@ -721,7 +731,7 @@ async def websocket_stream(ws: WebSocket):
                 await ws.send_text(json.dumps(tel))
 
             await asyncio.sleep(0.02)
-    except (WebSocketDisconnect, asyncio.CancelledError):
+    except Exception:
         pass
 
 
