@@ -145,30 +145,33 @@ class AirCanvas:
 
     def _async_materialize_worker(self, canvas_copy: np.ndarray, min_x: int, min_y: int, size: int, hint: Optional[str], w: int, h: int):
         try:
-            # Identify sketch using Gemini Vision if hint not provided
             object_prompt = hint
             if not object_prompt and self.recognizer.is_configured():
+                self.materialize_status = "✨ Analyzing Sketch with Vision AI..."
                 object_prompt = self.recognizer.identify_sketch(canvas_copy)
 
             if not object_prompt:
                 object_prompt = "butterfly"
 
-            self.materialize_status = f"✨ Creating {object_prompt}..."
+            display_name = object_prompt.title()
+            self.last_recognized_name = display_name
+            self.materialize_status = f"✨ Recognized: '{display_name}'! Finding real PNG..."
 
-            # Generate realistic transparent cutout using Flux + rembg
+            # Retrieve authentic transparent PNG cutout online
             bgra_img, status_info = self.nano_banana.generate_cutout(object_prompt)
             if bgra_img is not None:
                 with self._mat_lock:
-                    obj = VirtualObject(self.object_mgr._next_id, object_prompt, bgra_img, min_x, min_y, size, size)
+                    obj = VirtualObject(self.object_mgr._next_id, display_name, bgra_img, min_x, min_y, size, size)
                     self.object_mgr._next_id += 1
                     self.object_mgr.objects.append(obj)
                     if self.canvas is not None:
                         self.canvas = np.zeros_like(self.canvas)
+
+                self.materialize_status = f"✨ Materialized: {display_name}!"
+                time.sleep(2.5)
             else:
-                with self._mat_lock:
-                    self.object_mgr.add_object(object_prompt, min_x, min_y, size, size)
-                    if self.canvas is not None:
-                        self.canvas = np.zeros_like(self.canvas)
+                self.materialize_status = f"Could not find PNG for {display_name}"
+                time.sleep(2.0)
 
         except Exception as e:
             print(f"[AirCanvas] Error in async materialize: {e}", file=sys.stderr)
@@ -353,6 +356,8 @@ class AirCanvas:
             "fps": round(self.fps, 1),
             "objects_count": len(self.object_mgr.objects),
             "grabbed_object": grabbed_object_name,
+            "recognized_name": getattr(self, "last_recognized_name", None),
+            "materialize_status": self.materialize_status,
             "snapped_shape": self.last_detected_shape,
             "has_api_key": self.nano_banana.is_configured()
         }

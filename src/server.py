@@ -499,13 +499,17 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <div style="background: rgba(36, 41, 56, 0.6); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 6px;">
+            <div style="background: rgba(36, 41, 56, 0.6); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 6px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Pipeline Mode</span>
-                    <span style="font-size: 0.72rem; color: #10b981; font-weight: 600;">100% Dynamic AI</span>
+                    <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Recognized Subject</span>
+                    <span id="recognizedBadge" style="font-size: 0.78rem; color: #38bdf8; font-weight: 600;">None yet</span>
                 </div>
-                <div style="font-size: 0.74rem; color: var(--text-secondary);">
-                    No hardcoded answers. Every sketch is perceived by Gemini vision and synthesized live via AI diffusion with rembg cutout.
+                <div id="statusLive" style="font-size: 0.74rem; color: var(--text-secondary); min-height: 18px;">
+                    Ready: Draw in the air and snap fingers!
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-subtle); padding-top: 6px; margin-top: 2px;">
+                    <span style="font-size: 0.7rem; color: var(--text-secondary);">Image Source</span>
+                    <span style="font-size: 0.7rem; color: #10b981; font-weight: 500;">Free Online PNGs</span>
                 </div>
                 <button class="btn-secondary" style="margin-top: 4px; padding: 5px 8px; font-size: 0.72rem; color: #f87171; width: 100%;" onclick="clearObjects()">
                     Clear Active Objects
@@ -582,6 +586,13 @@ HTML_TEMPLATE = """
                         const tel = JSON.parse(event.data);
                         document.getElementById("fpsIndicator").innerText = (tel.fps || 30.0).toFixed(1) + " FPS";
                         document.getElementById("objectCounter").innerText = `${tel.objects_count || 0} Objects`;
+
+                        if (tel.recognized_name) {
+                            document.getElementById("recognizedBadge").innerText = tel.recognized_name;
+                        }
+                        if (tel.materialize_status) {
+                            document.getElementById("statusLive").innerText = tel.materialize_status;
+                        }
 
                         document.querySelectorAll(".dock-tool[data-tool]").forEach(b => {
                             b.classList.toggle("active", b.getAttribute("data-tool") === tel.active_tool);
